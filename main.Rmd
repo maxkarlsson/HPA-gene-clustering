@@ -1,0 +1,90 @@
+---
+title: "HPA-gene-clustering"
+author: "María Bueno Álvez"
+date: "2/11/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+#Setup
+
+```{r setup, include=FALSE}
+
+# Packages
+library(tidyverse)
+library(NOISeq)
+library(uwot)
+library(pcaMethods)
+library(magrittr)
+library(factoextra)
+library(cluster)
+library(kohonen)
+library(pheatmap)
+library(clValid)
+library(ggthemes)
+library(ggrepel)
+#concaveman, ggalt, sf
+
+# Wd, scripts
+setwd("/Users/maria.bueno/Desktop/HPA-gene-clustering")
+source("scripts/functions_preprocessing.R")
+source("scripts/functions_dimensionalityreduction.R")
+source("scripts/functions_clustering.R")
+#source("scripts/functions_evaluation.R")
+
+# Data
+data <- 
+  read_delim("data/pig_filtered_sample_data.tab", delim = "\t")
+
+gene_info <-
+  read_delim("data/meta/pig_consensus_category_piggenome_92.tsv", delim = "\t")
+
+
+# Color palette
+colors <-
+  read_delim("data/meta/pig_tissue_colors.tsv", delim = "\t")
+
+tissue_colors <- colors  %>%
+  select(organ_color, consensus_tissue_name) %>%
+  distinct() %$%
+  set_names(organ_color, consensus_tissue_name)
+
+```
+
+
+#1- Data pre-processing
+
+```{r pre-procesing}
+
+# Filtering genes
+genes_to_filter <-
+  gene_info %>%
+  filter(distribution_category == "not detected") %>%
+  pull(ensg_id) 
+
+filtered_data <-
+  data %>% 
+  filter(!enssscg_id %in% genes_to_filter)
+
+# Normalize
+tmm_data <- 
+  filtered_data %>% 
+  ptpm_normalize(sample_col = "sample_ID", tpm_col= "tpm", format = "wide") %>%
+  tmm_normalize(doWeighting = FALSE) %>%
+  as_tibble(rownames = "enssscg_id") %>%
+  gather(key = "sample_ID", value = "tmm", - enssscg_id)
+
+```
+
+#2- Dimensionality reduction
+
+#3- Distance calculation
+
+#4- Clustering
+
+#5- Evaluation
+
+#6- Visualization
+
+#7- Annotation
