@@ -33,6 +33,9 @@ source("scripts/functions_dimensionalityreduction.R")
 source("scripts/functions_clustering.R")
 #source("scripts/functions_evaluation.R")
 
+map <- purrr::map
+select <- dplyr::select
+
 # Data
 data <- 
   read_delim("data/pig_filtered_sample_data.tab", delim = "\t")
@@ -40,6 +43,14 @@ data <-
 gene_info <-
   read_delim("data/meta/pig_consensus_category_piggenome_92.tsv", delim = "\t")
 
+tissue_info <-
+  gene_info %>%
+  filter(!ensg_id %in% genes_to_filter) %>%
+  separate_rows("enhanced_tissues", sep = ',') %>%
+  select(ensg_id,enhanced_tissues) %>%
+  remove_missing()
+  
+  
 
 # Color palette
 colors <-
@@ -75,15 +86,88 @@ tmm_data <-
   as_tibble(rownames = "enssscg_id") %>%
   gather(key = "sample_ID", value = "tmm", - enssscg_id)
 
+
+# Scale data
+scaled <- list("zscore","min-max","max") %>%
+  map(~data_scaling(df = tmm_data, col_value = "tmm",
+                    col_gene = "enssscg_id", col_sample = "sample_ID",
+                    log_transform = F, m = .x))
+scaled_data <- scaled [[1]]
 ```
 
 #2- Dimensionality reduction
 
+```{r dimensionality reduction}
+pca_data <- 
+  scaled_data %>%
+  pca_calc(npcs = 200)
+
+pca_data %>%
+  pca_plot()
+
+# Euc, Man, Pear
+
+#scaled_data %>%
+ # umap_calc(row_names = "enssscg_id", n_neigh = 20, color_tissue = T)
+```
+
 #3- Distance calculation
+
+```{r pre-procesing}
+
+dist_to_cluster <-
+  pca_data$scores %>%
+  dist_calc(comp = 30, m = "euclidean")
+
+save(dist_to_cluster,
+     file = "data/processed/distance_zscore.Rdata")
+#dist_to_cluster %>%
+ # fviz_dist()
+
+#dist_to_cluster %>%
+ # pheatmap()
+```
 
 #4- Clustering
 
+```{r cluster analysis}
+res_kmeans_1 <- 
+  dist_to_cluster %>%
+  clust(k = 100, m = "kmeans")
+
+# 
+
+save(res_kmeans_1,
+     file = "data/processed/clustering_zscore.Rdata")
+
+res_clara %>%
+  fviz_cluster()
+
+
+
+#memory.limit()
+#memory.size()
+```
+
 #5- Evaluation
+
+```{r pre-procesing}
+
+# Orthologs
+
+ortholog_info <- 
+  read_delim("data/meta/gene_orthologs.csv", delim = ",") %>%
+  select(enssscg_id, ensg_id)
+
+X %>%
+  left_join(ortholog_info)
+
+# set orthologs to rownames
+
+# evaluate
+
+
+```
 
 #6- Visualization
 
