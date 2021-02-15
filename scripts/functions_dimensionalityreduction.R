@@ -40,6 +40,23 @@ pca_calc <- function(data, npcs) {
        plot = pca_stats_plot)
 }
 
+# Plot PCA
+
+pca_plot <- function(data) {
+  data$scores %>%
+    as_tibble()%>%
+    mutate(enssscg_id = scaled_data$enssscg_id) %>%
+    left_join(tissue_info, by = c("enssscg_id" = "ensg_id")) %>%
+    ggplot(aes(PC1,PC2, color = enhanced_tissues)) +
+    geom_point(show.legend = F) +
+    theme_minimal()+
+    scale_color_manual(values = tissue_colors)
+  
+}
+
+
+
+
 
 # UMAP function (?)
 
@@ -62,7 +79,8 @@ umap_calc <- function (data, row_names, n_neigh, n_comp = 2, n_ep = 1000, color_
       ggplot(aes(V1,V2, color = enhanced_tissues)) +
       geom_point(show.legend = F) +
       theme_minimal() +
-      scale_color_manual(values = tissue_colors)
+      scale_color_manual(values = tissue_colors) +
+      coord_fixed()
   }
   
   else {
@@ -70,7 +88,8 @@ umap_calc <- function (data, row_names, n_neigh, n_comp = 2, n_ep = 1000, color_
       umap_res %>%
       ggplot(aes(V1,V2)) +
       geom_point() +
-      theme_minimal()
+      theme_minimal()+
+      coord_fixed()
   }
   
   list(umap = umap_res,
