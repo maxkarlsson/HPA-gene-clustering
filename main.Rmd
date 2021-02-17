@@ -1,6 +1,6 @@
 ---
 title: "HPA-gene-clustering"
-author: "María Bueno Álvez"
+author: "MarIa Bueno Alvez"
 date: "2/11/2021"
 output: html_document
 editor_options: 
@@ -20,10 +20,14 @@ library(magrittr)
 library(factoextra)
 library(cluster)
 library(kohonen)
+library(ClusterR)
+library(fclust)
+library(flashClust)
 library(pheatmap)
 library(clValid)
 library(ggthemes)
 library(ggrepel)
+library(readr)
 #concaveman, ggalt, sf
 
 # Wd, scripts
@@ -36,6 +40,9 @@ source("scripts/functions_clustering.R")
 map <- purrr::map
 select <- dplyr::select
 
+```
+
+```{r setup, include=FALSE}
 # Data
 data <- 
   read_delim("data/pig_filtered_sample_data.tab", delim = "\t")
@@ -92,18 +99,40 @@ scaled <- list("zscore","min-max","max") %>%
   map(~data_scaling(df = tmm_data, col_value = "tmm",
                     col_gene = "enssscg_id", col_sample = "sample_ID",
                     log_transform = F, m = .x))
-scaled_data <- scaled [[1]]
+
+#scaled_data <- scaled [[1]]
+
+a <- filtered_data %>% 
+  ptpm_normalize(sample_col = "sample_ID", tpm_col= "tpm", format = "wide") %>%
+  tmm_normalize(doWeighting = FALSE) %>%
+  as_tibble(rownames = "enssscg_id")
+
+gene_names <- a$enssscg_id
+
+# Remove data
+rm(a)
+rm(data)
+rm(tmm_data)
 ```
 
 #2- Dimensionality reduction
 
 ```{r dimensionality reduction}
-pca_data <- 
-  scaled_data %>%
-  pca_calc(npcs = 200)
 
-pca_data %>%
-  pca_plot()
+#All PCAs
+pcas <- scaled %>%
+  map(~pca_calc(data = .x, npcs = 200))
+
+#pcas %>%
+ # map(~pca_plot(data = .x))
+
+# One pca
+#pca_data <- 
+ # scaled_data %>%
+  #pca_calc(npcs = 200)
+
+#pca_data %>%
+ # pca_plot()
 
 # Euc, Man, Pear
 
@@ -114,6 +143,33 @@ pca_data %>%
 #3- Distance calculation
 
 ```{r pre-procesing}
+
+#All distances
+pcas, list("euclidean","manhattan","pearson")
+
+combinations <- data.frame(pca = lits(pcas[[1]],pcas[[1]],pcas[[1]],
+                     pcas[[2]],pcas[[2]],pcas[[2]],
+                     pcas[[3]],pcas[[3]],pcas[[3]]),
+             dist_method = c("euclidean","manhattan","pearson","euclidean","manhattan",
+                             "pearson","euclidean","manhattan","pearson"))
+
+distances <- 
+  map2(combinations$pca, combinations$dist_method,
+      ~dist_calc(df = .x$scores, comp = 30, m = .y))
+
+
+d <- lapply(list("euclidean","manhattan","pearson"), function(i) map(pcas, 
+                                                                ~dist_calc(df = .x$scores, 
+                                                                           comp = 30, 
+                                                                           m = i)))
+            
+            
+            
+save(d,
+     file = "data/processed/all_distances.Rdata")
+
+
+#One distance matrix
 
 dist_to_cluster <-
   pca_data$scores %>%
@@ -135,7 +191,20 @@ res_kmeans_1 <-
   dist_to_cluster %>%
   clust(k = 100, m = "kmeans")
 
-# 
+results_kmeans <- results_kmeans
+class(d[[1]])
+
+
+results_kmeans <- lapply(list(1,2,3), function(i) map(d[[i]], 
+                                         ~clust(dist = .x$distance,
+                                                k = 100,
+                                                m = "fastkmeans"))
+            
+            
+                                           df = .x$scores, 
+                                                                           comp = 30, 
+                                                                           m = i))
+
 
 save(res_kmeans_1,
      file = "data/processed/clustering_zscore.Rdata")
@@ -144,9 +213,81 @@ res_clara %>%
   fviz_cluster()
 
 
+load("data/processed/distance_zscore.Rdata")
 
-#memory.limit()
-#memory.size()
+res_fast <- 
+  dist_to_cluster %>%
+  clust(k = 100, m = "fasthclust")
+
+res_kmeans_1$merge
+res_kmeans_1 %>%
+  cutree(100) %>%
+  pheatmap()
+
+fviz_cluster()
+plot(res_kmeans_1)
+
+fviz_dend(res_kmeans_1, cex = 0.5, k = 100,
+ color_labels_by_k = FALSE, rect = TRUE)
+
+
+res <- flashClust(dist_to_cluster, method = "ward", members = NULL)
+res <- res %>% cutree(100) %>% as_tibble()
+
+library(tidyverse)
+library(broom)
+library(magrittr)
+
+
+  as_tibble(rownames = "gene") 
+
+%>%
+  
+library(tidyverse)
+
+%>%
+      column_to_rownames("gene")
+
+res$value = as.factor(res$value)
+    
+    pdf("dendogram.pdf")
+    dist %>%
+      pheatmap(annotation_row = res)
+
+    res %>%
+      fviz_dend(cex = 0.5, k = k)
+    dev.off()
+
+
+```
+
+```{r}
+
+load("data/processed/distance_zscore.Rdata")
+
+res_kmeansfast <- 
+  dist_to_cluster %>%
+  clust(k = 100, m = "fastkmeans", genes = gene_names)
+
+
+
+clus_umap <- scaled_data %>%
+  umap_calc(row_names = "enssscg_id", n_neigh = 15, n_comp = 2)
+
+
+clus_umap$umap %>%
+  left_join(res_kmeansfast, by = c("features" = "gene")) %>%
+  ggplot(aes(V1,V2, color = as.factor(cluster))) +
+  geom_point() +
+  theme_minimal() +
+  coord_fixed() 
+
+res_kmeansfast %>%
+  fviz_cluster()
+
+scaled_data
+
+class(res_kmeansfast) <- "numeric"
 ```
 
 #5- Evaluation
@@ -170,5 +311,4 @@ X %>%
 ```
 
 #6- Visualization
-
 #7- Annotation
