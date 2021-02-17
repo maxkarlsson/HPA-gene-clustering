@@ -76,5 +76,21 @@ data_scaling <- function(df,col_value,col_gene,col_sample,
       spread(.data[[col_sample]], min_max) %>% 
       column_to_rownames(col_gene)
   }
+  
+  
+  else if (m == "max") {
+    df_scaled <-
+      df %>% 
+      group_by(.data[[col_gene]]) %>%
+      mutate(max = max(tmm)) %>%
+      ungroup() %>%
+      mutate (max_scaled = tmm/max) %>%
+      select(.data[[col_gene]], .data[[col_sample]], max_scaled) %>% 
+      mutate(max_scaled = ifelse(is.na(max_scaled), 0, max_scaled)) %>%
+      spread(.data[[col_sample]], max_scaled) %>% 
+      column_to_rownames(col_gene)
+    
+  }
+  
   return(df_scaled %>% as_tibble(rownames= col_gene))
 }
