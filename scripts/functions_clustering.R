@@ -31,6 +31,21 @@ clust <- function(dist, k = 10, m) {
   if (m == "fuzzyc") {
     res <- ""
   }
+  
+  if (m == "fasthclust"){
+    res <- flashClust(dist, method = "ward", members = NULL)
+    res <- res %>% cutree(k) %>% dplyr::as_tibble(rownames = "gene") %>%
+      column_to_rownames("gene")
+    res$value = as.factor(res$value)
+    
+    pdf("dendogram.pdf")
+    dist %>%
+      pheatmap(annotation_row = res)
+
+    res %>%
+      fviz_dend(cex = 0.5, k = k)
+    dev.off()
+  }
   end_time <- Sys.time()
   
   total_time <- end_time - start_time
@@ -38,3 +53,11 @@ clust <- function(dist, k = 10, m) {
   # Add progress bar?
   return(res)
 }
+
+load("data/processed/distance_zscore.Rdata")
+
+library(flashClust)
+res <- flashClust(dist_to_cluster, method = "ward", members = NULL)
+library(tidyverse)
+res <- res %>% cutree(100) %>% as_tibble()
+ 
