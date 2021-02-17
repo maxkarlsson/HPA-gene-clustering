@@ -10,32 +10,36 @@ dist_calc <- function(df,comp,m) {
   dist_matrix <-
     df  %>% as_tibble(rownames = "enssscg_id") %>%
     column_to_rownames("enssscg_id") %>%
-   # head(10000) %>%
+    # head(10000) %>%
     select(1:comp) %>%
     get_dist(method = m)
+  
+  list(data = df, 
+       method = m,
+       distance = dist_matrix)
 }
-
 
 # Clusteirng function
 
-clust <- function(dist, k = 10, m) {
+clust <- function(dist, k = 10, m, genes) {
   start_time <- Sys.time()
   
   if (m %in% c("kmeans", "pam", "clara", "fanny", "hclust", "agnes", "diana")) {
     res <- eclust(dist, FUNcluster = m, k = k, nboot = 500)
   }
   
-  if (m == "fastkmeans")) {
+  if (m == "fastkmeans") {
     centroids <- KMeans_arma(dist %>% as.matrix(), clusters = k,
                              n_iter = 10, seed_mode = "random_subset")
-    res <- predict_KMeans(dist %>% as.matrix(), centroids, threads = 2)
+    res <- predict_KMeans(dist %>% as.matrix(), centroids)
+    class(res) <- "numeric"
   }
   
   if (m == "louvain") {
     # not tried - try with 500 genes first
     
     # Create graph from distance matrix
-    graph <- grap.adjacency(dist %>% as.matrix(), mode = "undirected", weighted = TRUE. diag = TRUE)
+    graph <- grap.adjacency(dist %>% as.matrix(), mode = "undirected", weighted = TRUE, diag = TRUE)
     fromto <- get.edgelist(graph)
     clustergraph <- graph_from_edgelist(fromto, directed = FALSE) %>%
       set.edge.attribute("weight", value = E(graph)$weight)
@@ -48,6 +52,7 @@ clust <- function(dist, k = 10, m) {
     
     res <- clustergraph$community
   }
+  
   if (m == "dbscan") {
     #test
     #ADD library(dbscan) to main
@@ -56,12 +61,16 @@ clust <- function(dist, k = 10, m) {
       dist %>%
       dbscan::dbscan(eps = 10) #???
   }
+  
   if (m == "SOM") {
     res <- som(dist %>% as.matrix())
   }
+  
   if (m == "fuzzyc") {
-    res <- FKM(dist %>% as.matrix(), k = k)
+    res_fuzzy <- FKM(dist %>% as.matrix(), k = k)
+    res <- as.numeric(res_fuzzy$clus[,1])
   }
+  
   
   if (m == "fasthclust"){
     res <- flashClust(dist, method = "ward", members = NULL)
@@ -82,12 +91,11 @@ clust <- function(dist, k = 10, m) {
   total_time <- end_time - start_time
   print(total_time)
   # Add progress bar?
+  
+  res <- data.frame(gene = genes, cluster = res)
+  
   return(res)
 }
 
-load("data/processed/distance_zscore.Rdata")
 
-
-res <- flashClust(dist_to_cluster, method = "ward", members = NULL)
-res <- res %>% cutree(100) %>% as_tibble()
  
