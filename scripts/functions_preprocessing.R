@@ -92,5 +92,5 @@ data_scaling <- function(df,col_value,col_gene,col_sample,
     
   }
   
-  return(df_scaled %>% as_tibble(rownames= col_gene))
+  list(method = m, scaled = df_scaled %>% as_tibble(rownames= col_gene))
 }

@@ -1,12 +1,8 @@
-library(tidyverse)
-library(ClusterR)
-library(kohonen)
-library(fclust)
-library(flashClust)
 
 # Distance calculation function 
 
-dist_calc <- function(df,comp,m) {
+dist_calc <- function(df,comp,m,id=NULL) {
+  start_time <- Sys.time()
   dist_matrix <-
     df  %>% as_tibble(rownames = "enssscg_id") %>%
     column_to_rownames("enssscg_id") %>%
@@ -14,14 +10,24 @@ dist_calc <- function(df,comp,m) {
     select(1:comp) %>%
     get_dist(method = m)
   
-  list(data = df, 
-       method = m,
-       distance = dist_matrix)
+  end_time <- Sys.time()
+  total_time <- end_time - start_time
+  
+  if(!is.null(m)) {
+    return (list(id = paste(id, m),
+       distance = dist_matrix,
+       time = total_time))
+  }
+  
+  else {
+    return (list(distance = dist_matrix,
+                 time = total_time))
+  }
 }
 
 # Clusteirng function
 
-clust <- function(dist, k = 10, m, genes) {
+clust <- function(dist, k = 10, m, genes, id = NULL) {
   start_time <- Sys.time()
   
   if (m %in% c("kmeans", "pam", "clara", "fanny", "hclust", "agnes", "diana")) {
@@ -90,12 +96,21 @@ clust <- function(dist, k = 10, m, genes) {
   
   total_time <- end_time - start_time
   print(total_time)
-  # Add progress bar?
+
+    # Add progress bar?
   
   res <- data.frame(gene = genes, cluster = res)
   
-  return(res)
-}
+  if(!is.null(m)) {
+    return(list(cluster = res,
+                time = total_time,
+                id = paste(id,m)))
+  }
+  else {
+    return(list(cluster = res,
+                time = total_time))
+    }
+  }
 
 
  

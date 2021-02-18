@@ -13,16 +13,17 @@ editor_options:
 
 # Packages
 library(tidyverse)
+library(magrittr)
 library(NOISeq)
 library(uwot)
 library(pcaMethods)
-library(magrittr)
 library(factoextra)
 library(cluster)
 library(kohonen)
 library(ClusterR)
 library(fclust)
 library(flashClust)
+library(dbscan)
 library(pheatmap)
 library(clValid)
 library(ggthemes)
@@ -94,13 +95,6 @@ tmm_data <-
   gather(key = "sample_ID", value = "tmm", - enssscg_id)
 
 
-# Scale data
-scaled <- list("zscore","min-max","max") %>%
-  map(~data_scaling(df = tmm_data, col_value = "tmm",
-                    col_gene = "enssscg_id", col_sample = "sample_ID",
-                    log_transform = F, m = .x))
-
-#scaled_data <- scaled [[1]]
 
 a <- filtered_data %>% 
   ptpm_normalize(sample_col = "sample_ID", tpm_col= "tpm", format = "wide") %>%
@@ -108,6 +102,12 @@ a <- filtered_data %>%
   as_tibble(rownames = "enssscg_id")
 
 gene_names <- a$enssscg_id
+
+# Scale data
+scaled <- list("zscore","min-max","max") %>%
+  map(~data_scaling(df = tmm_data, col_value = "tmm",
+                    col_gene = "enssscg_id", col_sample = "sample_ID",
+                    log_transform = F, m = .x))
 
 # Remove data
 rm(a)
@@ -121,7 +121,9 @@ rm(tmm_data)
 
 #All PCAs
 pcas <- scaled %>%
-  map(~pca_calc(data = .x, npcs = 200))
+  map(~pca_calc(data = .x$scaled, npcs = 200, m = .x$method))
+
+pcas[[1]]$method
 
 #pcas %>%
  # map(~pca_plot(data = .x))
@@ -145,32 +147,15 @@ pcas <- scaled %>%
 ```{r pre-procesing}
 
 #All distances
-pcas, list("euclidean","manhattan","pearson")
-
-combinations <- data.frame(pca = lits(pcas[[1]],pcas[[1]],pcas[[1]],
-                     pcas[[2]],pcas[[2]],pcas[[2]],
-                     pcas[[3]],pcas[[3]],pcas[[3]]),
-             dist_method = c("euclidean","manhattan","pearson","euclidean","manhattan",
-                             "pearson","euclidean","manhattan","pearson"))
-
-distances <- 
-  map2(combinations$pca, combinations$dist_method,
-      ~dist_calc(df = .x$scores, comp = 30, m = .y))
-
-
-d <- lapply(list("euclidean","manhattan","pearson"), function(i) map(pcas, 
-                                                                ~dist_calc(df = .x$scores, 
-                                                                           comp = 30, 
-                                                                           m = i)))
-            
-            
+distances <- lapply(list("euclidean","manhattan","pearson"), function(i)
+  map(pcas, ~dist_calc(df = .x$scores, comp = 30, m = i, 
+                       id = .x$method)))
             
 save(d,
      file = "data/processed/all_distances.Rdata")
 
 
 #One distance matrix
-
 dist_to_cluster <-
   pca_data$scores %>%
   dist_calc(comp = 30, m = "euclidean")
@@ -198,16 +183,12 @@ class(d[[1]])
 results_kmeans <- lapply(list(1,2,3), function(i) map(d[[i]], 
                                          ~clust(dist = .x$distance,
                                                 k = 100,
-                                                m = "fastkmeans"))
-            
-            
-                                           df = .x$scores, 
-                                                                           comp = 30, 
-                                                                           m = i))
+                                                m = "fastkmeans",
+                                                genes  = gene_names,
+                                                id = .x$id)))
 
-
-save(res_kmeans_1,
-     file = "data/processed/clustering_zscore.Rdata")
+save(results_kmeans,
+     file = "data/processed/clusterings_kmeans.Rdata")
 
 res_clara %>%
   fviz_cluster()

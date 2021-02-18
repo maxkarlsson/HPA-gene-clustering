@@ -1,7 +1,7 @@
 
 # PCA function
 
-pca_calc <- function(data, npcs) {
+pca_calc <- function(data, npcs, m = NULL) {
   require(pcaMethods)
   pca_res <-
     data %>%
@@ -32,13 +32,26 @@ pca_calc <- function(data, npcs) {
              hjust = 1,
              vjust = 0)
   
-  list(pca = pca_res,
+  
+  if(!is.null(m)) {
+    return(list(pca = pca_res,
        scores = pcaMethods::scores(pca_res),
        loadings = pcaMethods::loadings(pca_res),
        stats = pca_stats,
        pc_95 = informative_pcs,
-       plot = pca_stats_plot)
-}
+       plot = pca_stats_plot,
+       method = m))
+    }
+  
+  else {
+    return(list(pca = pca_res,
+                scores = pcaMethods::scores(pca_res),
+                loadings = pcaMethods::loadings(pca_res),
+                stats = pca_stats,
+                pc_95 = informative_pcs,
+                plot = pca_stats_plot))
+    }
+  }
 
 # Plot PCA
 
