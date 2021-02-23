@@ -26,6 +26,10 @@ library(flashClust)
 library(dbscan)
 library(pheatmap)
 library(clValid)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(annotate)
+library(GO.db)
 library(ggthemes)
 library(ggrepel)
 library(readr)
@@ -36,7 +40,7 @@ setwd("/Users/maria.bueno/Desktop/HPA-gene-clustering")
 source("scripts/functions_preprocessing.R")
 source("scripts/functions_dimensionalityreduction.R")
 source("scripts/functions_clustering.R")
-#source("scripts/functions_evaluation.R")
+source("scripts/functions_evaluation.R")
 
 map <- purrr::map
 select <- dplyr::select
@@ -86,6 +90,17 @@ filtered_data <-
   data %>% 
   filter(!enssscg_id %in% genes_to_filter)
 
+
+# Save gene names in order
+gene_names <- 
+  filtered_data %>%
+  select(enssscg_id, sample_ID, tpm) %>%
+  spread(key = sample_ID , value = tpm) %$%
+  enssscg_id
+
+save(gene_names,
+     file = "data/processed/gene_names.Rdata")
+
 # Normalize
 tmm_data <- 
   filtered_data %>% 
@@ -94,14 +109,6 @@ tmm_data <-
   as_tibble(rownames = "enssscg_id") %>%
   gather(key = "sample_ID", value = "tmm", - enssscg_id)
 
-
-
-a <- filtered_data %>% 
-  ptpm_normalize(sample_col = "sample_ID", tpm_col= "tpm", format = "wide") %>%
-  tmm_normalize(doWeighting = FALSE) %>%
-  as_tibble(rownames = "enssscg_id")
-
-gene_names <- a$enssscg_id
 
 # Scale data
 scaled <- list("zscore","min-max","max") %>%
@@ -244,13 +251,33 @@ res$value = as.factor(res$value)
 
 ```{r}
 
-load("data/processed/distance_zscore.Rdata")
+load("../distances.Rdata")
 
 res_kmeansfast <- 
   dist_to_cluster %>%
   clust(k = 100, m = "fastkmeans", genes = gene_names)
 
 
+res_hclust <- 
+  distances %>%
+  map(~clust(dist = .x$distance, k = 100, m = "fasthclust", genes = gene_names))
+
+res_fuzzyc1 <- 
+  distances[[1]]$distance %>%
+  clust(k = 100, m = "fuzzyc", genes = gene_names)
+      
+      
+      
+  res_hclust <- 
+  distances %>%
+  map(~clust(dist = .x$distance, k = 100, m = "fasthclust", genes = gene_names)
+      
+res_hclust <- 
+  distances %>%
+  map(~clust(dist = .x$distance, k = 100, m = "fasthclust", genes = gene_names)
+
+
+      
 
 clus_umap <- scaled_data %>%
   umap_calc(row_names = "enssscg_id", n_neigh = 15, n_comp = 2)
@@ -269,25 +296,81 @@ res_kmeansfast %>%
 scaled_data
 
 class(res_kmeansfast) <- "numeric"
+
+
+clust_fastkmeans <- map(distances, 
+                                         ~clust(dist = .x$distance,
+                                                k = 100,
+                                                m = "fastkmeans",
+                                                genes  = gene_names,
+                                                id = .x$id))
+
+clust_fuzzyc <-  map(distances, 
+                                         ~clust(dist = .x$distance,
+                                                k = 100,
+                                                m = "fuzzyc",
+                                                genes  = gene_names,
+                                                id = .x$id))
+
+clust_fasthclust <- map(distances, 
+                                         ~clust(dist = .x$distance,
+                                                k = 100,
+                                                m = "fasthclust",
+                                                genes  = gene_names,
+                                                id = .x$id))
+
+library(dbsca)
+
+clust_louvain <- map(distances, 
+                                         ~clust(dist = .x$distance,
+                                                k = 100,
+                                                m = "louvain",
+                                                genes  = gene_names,
+                                                id = .x$id))
+
+
+clust_dbscan <- map(distances, 
+                                         ~clust(dist = .x$distance,
+                                                k = 100,
+                                                m = "dbscan",
+                                                genes  = gene_names,
+                                                id = .x$id))
+
+clust_SOM <- map(distances, 
+                                         ~clust(dist = .x$distance,
+                                                k = 100,
+                                                m = "SOM",
+                                                genes  = gene_names,
+                                                id = .x$id))
 ```
 
 #5- Evaluation
 
 ```{r pre-procesing}
 
-# Orthologs
+# Attach random clustering to cluster list
 
+
+
+# Ortholog information
 ortholog_info <- 
   read_delim("data/meta/gene_orthologs.csv", delim = ",") %>%
   select(enssscg_id, ensg_id)
 
-X %>%
-  left_join(ortholog_info)
+ortholog_info$entrez = mapIds(org.Hs.eg.db,
+                  keys=ortholog_info$ensg_id, 
+                  column="ENTREZID",
+                  keytype="ENSEMBL")
 
-# set orthologs to rownames
+# Evaluation
+res_eval <- 
+  res_hclust[[1]]$cluster %>%
+  eval(genes = ortholog_info, distance = distances[[1]]$distance %>% as.matrix())
 
-# evaluate
 
+# Plots
+
+  
 
 ```
 
