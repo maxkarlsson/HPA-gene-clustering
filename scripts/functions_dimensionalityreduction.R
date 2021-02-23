@@ -87,7 +87,7 @@ umap_calc <- function (data, row_names, n_neigh, n_comp = 2, n_ep = 1000, color_
   if (color_tissue == T) {
     umap_plot <-
       umap_res %>%
-      mutate(enssscg_id = scaled_data$enssscg_id) %>%
+      mutate(enssscg_id = gene_names) %>%
       left_join(tissue_info, by = c("enssscg_id" = "ensg_id")) %>%
       ggplot(aes(V1,V2, color = enhanced_tissues)) +
       geom_point(show.legend = F) +
