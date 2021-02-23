@@ -13,7 +13,7 @@ dist_calc <- function(df,comp,m,id=NULL) {
   end_time <- Sys.time()
   total_time <- end_time - start_time
   
-  if(!is.null(m)) {
+  if(!is.null(id)) {
     return (list(id = paste(id, m),
        distance = dist_matrix,
        time = total_time))
@@ -84,13 +84,13 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
       column_to_rownames("gene")
     res$value = as.factor(res$value)
     
-    pdf("dendogram.pdf")
-    dist %>%
-      pheatmap(annotation_row = res)
+   # pdf("dendogram.pdf")
+  #  dist %>%
+   #   pheatmap(annotation_row = res)
 
-    res %>%
-      fviz_dend(cex = 0.5, k = k)
-    dev.off()
+    #res %>%
+     # fviz_dend(cex = 0.5, k = k)
+  #  dev.off()
   }
   end_time <- Sys.time()
   
@@ -101,7 +101,7 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
   
   res <- data.frame(gene = genes, cluster = res)
   
-  if(!is.null(m)) {
+  if(!is.null(id)) {
     return(list(cluster = res,
                 time = total_time,
                 id = paste(id,m)))
