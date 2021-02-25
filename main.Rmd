@@ -24,6 +24,7 @@ library(ClusterR)
 library(fclust)
 library(flashClust)
 library(dbscan)
+library(igraph)
 library(pheatmap)
 library(clValid)
 library(AnnotationDbi)
@@ -197,44 +198,8 @@ results_kmeans <- lapply(list(1,2,3), function(i) map(d[[i]],
 save(results_kmeans,
      file = "data/processed/clusterings_kmeans.Rdata")
 
-res_clara %>%
-  fviz_cluster()
 
 
-load("data/processed/distance_zscore.Rdata")
-
-res_fast <- 
-  dist_to_cluster %>%
-  clust(k = 100, m = "fasthclust")
-
-res_kmeans_1$merge
-res_kmeans_1 %>%
-  cutree(100) %>%
-  pheatmap()
-
-fviz_cluster()
-plot(res_kmeans_1)
-
-fviz_dend(res_kmeans_1, cex = 0.5, k = 100,
- color_labels_by_k = FALSE, rect = TRUE)
-
-
-res <- flashClust(dist_to_cluster, method = "ward", members = NULL)
-res <- res %>% cutree(100) %>% as_tibble()
-
-library(tidyverse)
-library(broom)
-library(magrittr)
-
-
-  as_tibble(rownames = "gene") 
-
-%>%
-  
-library(tidyverse)
-
-%>%
-      column_to_rownames("gene")
 
 res$value = as.factor(res$value)
     
@@ -251,7 +216,41 @@ res$value = as.factor(res$value)
 
 ```{r}
 
-load("../distances.Rdata")
+load("data/processed/distances.Rdata")
+load("data/processed/gene_names.Rdata")
+
+
+res_kmeansfast <- 
+  distances %>%
+  map(~clust(dist = .x$distance, k = 100, m = "fastkmeans", genes = gene_names, id = .x$id))
+save(res_kmeansfast,
+     file = "data/processed/results_kmeansfast.Rdata")
+
+res_hclust <- 
+  distances %>%
+  map(~clust(dist = .x$distance, k = 100, m = "fasthclust", genes = gene_names,  id = .x$id))
+save(res_hclust,
+     file = "data/processed/results_hclust.Rdata")
+
+res_hclust[[1]]$id
+
+res_fuz <- KMeans_rcpp(data = distances[[1]]$distance %>% as.matrix(), 
+                       clusters = 100, fuzzy = TRUE)
+#clust(dist = distances[[1]]$distance, k = 100, m = )
+
+
+res_kmeansfast <- 
+  distances %>%
+  map(~clust(dist = .x$distance, k = 100, m = "fastkmeans", genes = gene_names, id = .x$id))
+save(res_kmeansfast,
+     file = "data/processed/results_kmeansfast.Rdata")
+
+res_kmeansfast <- 
+  distances %>%
+  map(~clust(dist = .x$distance, k = 100, m = "fastkmeans", genes = gene_names, id = .x$id))
+save(res_kmeansfast,
+     file = "data/processed/results_kmeansfast.Rdata")
+
 
 res_kmeansfast <- 
   dist_to_cluster %>%
@@ -319,7 +318,7 @@ clust_fasthclust <- map(distances,
                                                 genes  = gene_names,
                                                 id = .x$id))
 
-library(dbsca)
+library(dbscan)
 
 clust_louvain <- map(distances, 
                                          ~clust(dist = .x$distance,
@@ -342,30 +341,63 @@ clust_SOM <- map(distances,
                                                 m = "SOM",
                                                 genes  = gene_names,
                                                 id = .x$id))
+
+d <-distances[[1]]
+
+c <- 
+  clust(dist = d$distance, k=100, m = "louvain", genes = gene_names, id = d$id)
+
+clust_louvain <- map(distances, 
+                                         ~clust(dist = .x$distance,
+                                                k = 100,
+                                                m = "louvain",
+                                                genes  = gene_names,
+                                                id = .x$id))
+
 ```
 
 #5- Evaluation
 
 ```{r pre-procesing}
 
+load("data/processed/clusteringshclust.Rdata")
+load("data/processed/distances.Rdata")
+load("data/processed/gene_names.Rdata")
+
 # Attach random clustering to cluster list
-
-
+random <- random_cluster(100, 22007, names = gene_names)
 
 # Ortholog information
 ortholog_info <- 
   read_delim("data/meta/gene_orthologs.csv", delim = ",") %>%
-  select(enssscg_id, ensg_id)
-
-ortholog_info$entrez = mapIds(org.Hs.eg.db,
-                  keys=ortholog_info$ensg_id, 
+  select(enssscg_id, ensg_id) %>%
+  dplyr::mutate(entrez = mapIds(org.Hs.eg.db,
+                  keys= ensg_id, 
                   column="ENTREZID",
-                  keytype="ENSEMBL")
+                  keytype="ENSEMBL"))
 
 # Evaluation
-res_eval <- 
-  res_hclust[[1]]$cluster %>%
-  eval(genes = ortholog_info, distance = distances[[1]]$distance %>% as.matrix())
+res_eval_hclust <- 
+  map(c(1:9),
+         ~eval(clustering = res_hclust[[.x]]$cluster, 
+              genes = ortholog_info, 
+              dist = distances[[.x]]$distance,
+              id = res_hclust[[.x]]$id)
+         )
+
+res_eval_kmeans <- 
+  lapply(c(1:9),
+         function(i) eval(clustering = res_kmeansfast[[i]]$cluster, 
+              genes = ortholog_info, 
+              dist = distances[[i]]$distance,
+              id = res_kmeansfast[[i]]$id))
+         )
+
+
+random_eval <- eval(clustering = random,
+                    genes = ortholog_info,
+                    dist = distances [[1]]$distance)
+
 
 
 # Plots

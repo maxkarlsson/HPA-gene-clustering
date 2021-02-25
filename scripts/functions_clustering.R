@@ -41,35 +41,54 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
     class(res) <- "numeric"
   }
   
+  
   if (m == "louvain") {
-    # not tried - try with 500 genes first
+  
+    dist <- dist %>%
+      as.matrix() %>%
+      set_colnames(genes) %>%
+      set_rownames(genes)%>%
+      as.dist()
     
-    # Create graph from distance matrix
-    graph <- grap.adjacency(dist %>% as.matrix(), mode = "undirected", weighted = TRUE, diag = TRUE)
-    fromto <- get.edgelist(graph)
-    clustergraph <- graph_from_edgelist(fromto, directed = FALSE) %>%
-      set.edge.attribute("weight", value = E(graph)$weight)
+      louv <-
+        CreateSeuratObject(assay = "Exp",
+                           counts = t(data.frame(row.names = genes, count = c(1:22007))))
+    neighbors <-
+      FindNeighbors(
+        dist,
+        k.param = 20,
+        return.neighbor = FALSE,
+        compute.SNN = TRUE,
+        prune.SNN = 1/15,
+        nn.method = "annoy", #Distance metric for annoy. Options include: euclidean, cosine, manhattan, and hamming
+        n.trees = 50,
+        annoy.metric = "euclidean",####mirar
+        nn.eps = 0,
+        verbose = TRUE,
+        force.recalc = FALSE,
+        l2.norm = FALSE,
+        cache.index = FALSE
+      )
     
-    # Louvain parittion (weights)
-    louvain_partition <- cluster_louvain(clustergraph, weights = E(graph)$weight)
+    louv@graphs$Exp_snn <- neighbors$snn
     
-    # Community detection
-    clustergraph$community <- louvain_partition$membership
+    louv <- FindClusters(louv, graph.name = "Exp_snn", resolution = 10, algorithm = 1)
     
-    res <- clustergraph$community
+    res <- as.numeric(as.character(louv@meta.data$Exp_snn_res.10))
+    
   }
   
   if (m == "dbscan") {
-    #test
-    #ADD library(dbscan) to main
-    
-    res <- 
+    res_dbscan <- 
       dist %>%
-      dbscan::dbscan(eps = 10) #???
+      dbscan::dbscan(eps = 100, minPts = 5) 
+    res <- as.numeric(res_dbscan$cluster)
+    
   }
   
   if (m == "SOM") {
-    res <- som(dist %>% as.matrix())
+    res_som <- som(dist %>% as.matrix())
+    res <- res_som$unit.classif
   }
   
   if (m == "fuzzyc") {
@@ -83,15 +102,8 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
     res <- res %>% cutree(k) %>% dplyr::as_tibble(rownames = "gene") %>%
       column_to_rownames("gene")
     res$value = as.factor(res$value)
-    
-   # pdf("dendogram.pdf")
-  #  dist %>%
-   #   pheatmap(annotation_row = res)
-
-    #res %>%
-     # fviz_dend(cex = 0.5, k = k)
-  #  dev.off()
   }
+  
   end_time <- Sys.time()
   
   total_time <- end_time - start_time
@@ -99,7 +111,7 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
 
     # Add progress bar?
   
-  res <- data.frame(gene = genes, cluster = res)
+  res <- data.frame(gene = genes, value = res)
   
   if(!is.null(id)) {
     return(list(cluster = res,
@@ -112,5 +124,22 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
     }
   }
 
+#load("data/processed/distances.Rdata")
+#load("data/processed/gene_names.Rdata")
 
- 
+#d <- distances[[1]]
+#rm(distances)
+
+#graph <- graph.adjacency(d$distance %>% as.matrix(), mode = "undirected", weighted = TRUE, diag = TRUE)
+
+#fromto <- get.edgelist(graph)
+#clustergraph <- graph_from_edgelist(fromto, directed = FALSE) %>%
+ # set.edge.attribute("weight", value = E(graph)$weight)
+
+# Louvain parittion (weights)
+#louvain_partition <- cluster_louvain(clustergraph, weights = E(graph)$weight)
+
+# Community detection
+#clustergraph$community <- louvain_partition$membership
+
+#res3 <- clustergraph$community
