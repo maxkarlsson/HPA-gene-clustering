@@ -42,8 +42,16 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
   }
   
   
-  if (m == "louvain") {
-  
+  if (m == "louvain" | m == "leiden") {
+    
+    if (m == "louvain") {
+      alg = 1
+    }
+    
+    if (m == "leiden") {
+      alg = 3
+    }
+        
     dist <- dist %>%
       as.matrix() %>%
       set_colnames(genes) %>%
@@ -72,7 +80,7 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
     
     louv@graphs$Exp_snn <- neighbors$snn
     
-    louv <- FindClusters(louv, graph.name = "Exp_snn", resolution = 10, algorithm = 1)
+    louv <- FindClusters(louv, graph.name = "Exp_snn", resolution = 10, algorithm = alg)
     
     res <- as.numeric(as.character(louv@meta.data$Exp_snn_res.10))
     
