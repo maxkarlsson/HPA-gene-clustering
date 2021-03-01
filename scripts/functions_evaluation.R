@@ -6,6 +6,17 @@ random_cluster <- function (k,l, names) {
   return(data.frame(gene = names, cluster = cluster))
 }
 
+# Transform results to dataframe
+clusters_to_df <- function (res_list, gene_names) {
+  df <- data.frame(id,gene,cluster)
+  for res in res_list {
+    new_entries <- data.frame(id = res$id, gene =  gene_names, cluster = res$cluster)
+    df <- bind_rows(df, new_entries)
+  }
+  return(df)
+}
+
+
 
 # Evaluation 
 
@@ -36,13 +47,18 @@ eval <- function(clustering, genes, dist, id = NULL) { # add distance
 
   
   if(!is.null(id)) {
-    return(list(connectivity = con_index,
+    return(data.frame(connectivity = con_index,
                 dunn = dunn_index,
                 BHI = bio_index,
                 id = id))
+    
+    #return(list(connectivity = con_index,
+    #           dunn = dunn_index,
+    #          BHI = bio_index,
+    #         id = id))
   }
   else {
-    return(list(connectivity = con_index,
+    return(data.frame(connectivity = con_index,
                 dunn = dunn_index,
                 BHI = bio_index))
   }
