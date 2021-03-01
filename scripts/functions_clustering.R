@@ -41,6 +41,11 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
     class(res) <- "numeric"
   }
   
+  if (m == "medoids") {
+    res <-  fastkmed(distdata = dist, ncluster = k, iterate = 100)
+    res <- as.numeric(res$cluster)
+  }
+  
   
   if (m == "louvain" | m == "leiden") {
     
@@ -49,7 +54,7 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
     }
     
     if (m == "leiden") {
-      alg = 3
+      alg = 4
     }
         
     dist <- dist %>%
