@@ -73,13 +73,13 @@ pca_plot <- function(data) {
 
 # UMAP function (?)
 
-umap_calc <- function (data, row_names, n_neigh, n_comp = 2, n_ep = 1000, color_tissue = F) {
+umap_calc <- function (data, row_names, n_neigh, n_comp = 2, n_ep = 1000, color_tissue = F, met = "euclidean") {
   set.seed(42)
   rows <- data[[row_names]]
   umap_res <-
     data %>%
     column_to_rownames(row_names) %>%
-    uwot::umap(n_neighbors = n_neigh, n_components = n_comp, n_epochs = n_ep) %>%
+    uwot::umap(n_neighbors = n_neigh, n_components = n_comp, n_epochs = n_ep, nn_method = "annoy", metric = met) %>%
     tibble::as_tibble () %>%
     mutate(features = rows)
   
