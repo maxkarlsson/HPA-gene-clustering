@@ -35,6 +35,8 @@ eval <- function(clustering, genes, dist, id = NULL) { # add distance
   if (grepl("zscore pearson",id)){d <- dist[[7]]$distance}
   if (grepl("min-max pearson",id)){d <- dist[[8]]$distance}
   if (grepl("max pearson",id)){d <- dist[[9]]$distance}
+  if (grepl("random",id)){d <- dist[[1]]$distance}
+  
   
   r <- 
     clustering %>%
