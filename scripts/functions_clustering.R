@@ -136,23 +136,3 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
                 time = total_time))
     }
   }
-
-#load("data/processed/distances.Rdata")
-#load("data/processed/gene_names.Rdata")
-
-#d <- distances[[1]]
-#rm(distances)
-
-#graph <- graph.adjacency(d$distance %>% as.matrix(), mode = "undirected", weighted = TRUE, diag = TRUE)
-
-#fromto <- get.edgelist(graph)
-#clustergraph <- graph_from_edgelist(fromto, directed = FALSE) %>%
- # set.edge.attribute("weight", value = E(graph)$weight)
-
-# Louvain parittion (weights)
-#louvain_partition <- cluster_louvain(clustergraph, weights = E(graph)$weight)
-
-# Community detection
-#clustergraph$community <- louvain_partition$membership
-
-#res3 <- clustergraph$community
