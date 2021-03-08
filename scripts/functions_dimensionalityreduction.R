@@ -53,7 +53,8 @@ pca_calc <- function(data, npcs, m = NULL) {
     }
   }
 
-# Plot PCA
+
+# Plot PCA results
 
 pca_plot <- function(data) {
   data$scores %>%
@@ -69,9 +70,7 @@ pca_plot <- function(data) {
 
 
 
-
-
-# UMAP function (?)
+# UMAP function
 
 umap_calc <- function (data, row_names, n_neigh, n_comp = 2, n_ep = 1000, color_tissue = F, met = "euclidean") {
   set.seed(42)
@@ -83,21 +82,24 @@ umap_calc <- function (data, row_names, n_neigh, n_comp = 2, n_ep = 1000, color_
     tibble::as_tibble () %>%
     mutate(features = rows)
   
-  
-  if (color_tissue == T) {
-    umap_plot <-
-      umap_res %>%
-      mutate(enssscg_id = gene_names) %>%
-      left_join(tissue_info, by = c("enssscg_id" = "ensg_id")) %>%
-      ggplot(aes(V1,V2, color = enhanced_tissues)) +
-      geom_point(show.legend = F) +
-      theme_minimal() +
-      scale_color_manual(values = tissue_colors) +
-      coord_fixed()
-  }
-  
-  else {
-    umap_plot <-
+  return(umap_res)
+}
+
+
+get_density <- function(x, y, ...) {
+  dens <- MASS::kde2d(x, y, ...)
+  ix <- findInterval(x, dens$x)
+  iy <- findInterval(y, dens$y)
+  ii <- cbind(ix, iy)
+  return(dens$z[ii])
+}
+
+
+# Plot UMAP results
+
+umap_plot <- function (umap_res, color_by = NULL, color_groups = NULL) {
+  if (missing(color_by)) {
+    uplot <-
       umap_res %>%
       ggplot(aes(V1,V2)) +
       geom_point() +
@@ -105,6 +107,52 @@ umap_calc <- function (data, row_names, n_neigh, n_comp = 2, n_ep = 1000, color_
       coord_fixed()
   }
   
-  list(umap = umap_res,
-       plot = umap_plot)
-}
+  else if (color_by == "density") {
+    umap_res$density <- get_density(umap_res$V1, umap_res$V2, n = 1000)
+    uplot <-
+      umap_res %>%
+      ggplot(aes(V1,V2, colour = density)) +
+      geom_point() +
+      theme_minimal()+
+      coord_fixed()+ 
+      scale_color_viridis() 
+    }
+  
+  else if (color_by == "tissue") {
+    uplot <-
+      umap_res %>%
+      mutate(enssscg_id = gene_names) %>%
+      left_join(color_groups, by = c("enssscg_id" = "ensg_id")) %>%
+      ggplot(aes(V1,V2, color = enhanced_tissues)) +
+      geom_point(show.legend = F) +
+      theme_minimal() +
+      scale_color_manual(values = tissue_colors) +
+      coord_fixed()
+    }
+  
+  else if (color_by == "cluster") {
+    pal <- colorRampPalette(ocean.curl(130))(130)
+    
+    uplot <-
+      umap_res %>%
+      mutate(enssscg_id = gene_names) %>%
+      left_join(color_groups, by = c("enssscg_id" = "gene")) %>%
+      ggplot(aes(V1,V2, color = as.factor(value))) +
+      geom_point(show.legend = F) +
+      theme_minimal() +
+      scale_color_manual(values = pal) +
+      coord_fixed()
+    
+    }
+  
+    else {
+    uplot <-
+      umap_res %>%
+      ggplot(aes(V1,V2)) +
+      geom_point() +
+      theme_minimal()+
+      coord_fixed()
+  }
+  umap_plot
+  return(uplot)
+  }
