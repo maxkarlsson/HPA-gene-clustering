@@ -9,23 +9,28 @@ random_cluster <- function (k,l, names) {
 # Transform results to dataframe
 clusters_to_df <- function (res_list, gene_names) {
   df <- data.frame()
+  times <- data.frame()
   
   for (cluster_method in res_list) {
     for (res in cluster_method) {
-      new_entries <- data.frame(id = res$id, gene =  gene_names, 
+      new_entries <- data.frame(id = res$id, 
+                                gene =  gene_names, 
                                 cluster = as.numeric(as.character(res$cluster$value)))
       df <- bind_rows(df, new_entries)
+      times <- bind_rows(times, data.frame(
+                                id = res$id,
+                                time = as.numeric(res$time, units = "secs")))
     }
   }
-  return(df)
+  return(list(cluster_results = df, cluster_time = times))
 }
 
 # Evaluation 
 
-eval <- function(clustering, genes, dist, id = NULL) { # add distance
+eval <- function(clustering, genes, dist, times) { # add distance # , t, id = NULL
   
-  #clustering <- dplyr::rename(clustering, cluster = value)
-  
+  id <- unique(clustering$id)
+
   if (grepl("zscore euclidean",id)){d <- dist[[1]]$distance}
   if (grepl("min-max euclidean",id)){d <- dist[[2]]$distance}
   if (grepl("max euclidean",id)){d <- dist[[3]]$distance}
@@ -57,20 +62,27 @@ eval <- function(clustering, genes, dist, id = NULL) { # add distance
     if(require("Biobase") && require("annotate") && require("GO.db") &&
        require("org.Hs.eg.db")) {
       BHI(clusters, annotation="org.Hs.eg.db", names=r$entrez, category="all") 
-    }
-
+    }l
   
-  if(!is.null(id)) {
-    return(data.frame(id = id,
-                      connectivity = con_index,
-                      dunn = dunn_index,
-                      BHI = bio_index))
-  }
+  t <- times %>%
+    filter(id == id) %>%
+    pull(time)
   
-  else {
-    return(data.frame(connectivity = con_index,
-                      dunn = dunn_index,
-                      BHI = bio_index))
-  }
+  #if(!is.null(unique(id))) {
+    return(data.frame(clustering_id = id,
+                      connectivity_index = con_index,
+                      dunn_index = dunn_index,
+                      BHI_index = bio_index,
+                      time = t
+                      ))
+  #}
+  
+  #else {
+  #  return(data.frame(connectivity = con_index,
+  #                    dunn = dunn_index,
+  #                    BHI = bio_index,
+  #                    time = as.numeric(time, units = "secs")
+  #                    ))
+  #}
 
 }
