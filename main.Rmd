@@ -1,6 +1,6 @@
 ---
 title: "HPA-gene-clustering"
-author: "MarIa Bueno Alvez"
+author: "Maria Bueno Alvez"
 date: "2/11/2021"
 output: html_document
 editor_options: 
@@ -16,6 +16,8 @@ library(tidyverse)
 library(magrittr)
 library(NOISeq)
 library(uwot)
+library(MASS)
+library(viridis)
 library(pcaMethods)
 library(factoextra)
 library(cluster)
@@ -25,6 +27,8 @@ library(fclust)
 library(flashClust)
 library(dbscan)
 library(igraph)
+library(kmed)
+library(aricode)
 library(pheatmap)
 library(clValid)
 library(AnnotationDbi)
@@ -56,6 +60,11 @@ data <-
 gene_info <-
   read_delim("data/meta/pig_consensus_category_piggenome_92.tsv", delim = "\t")
 
+genes_to_filter <-
+  gene_info %>%
+  filter(distribution_category == "not detected") %>%
+  pull(ensg_id) 
+
 tissue_info <-
   gene_info %>%
   filter(!ensg_id %in% genes_to_filter) %>%
@@ -82,11 +91,6 @@ tissue_colors <- colors  %>%
 ```{r pre-procesing}
 
 # Filtering genes
-genes_to_filter <-
-  gene_info %>%
-  filter(distribution_category == "not detected") %>%
-  pull(ensg_id) 
-
 filtered_data <-
   data %>% 
   filter(!enssscg_id %in% genes_to_filter)
@@ -128,26 +132,14 @@ rm(tmm_data)
 ```{r dimensionality reduction}
 
 #All PCAs
+load("data/processed/scaled_data.Rdata")
+
 pcas <- scaled %>%
   map(~pca_calc(data = .x$scaled, npcs = 200, m = .x$method))
 
-pcas[[1]]$method
+save(pcas,
+     file = "data/processed/pcas.Rdata")
 
-#pcas %>%
- # map(~pca_plot(data = .x))
-
-# One pca
-#pca_data <- 
- # scaled_data %>%
-  #pca_calc(npcs = 200)
-
-#pca_data %>%
- # pca_plot()
-
-# Euc, Man, Pear
-
-#scaled_data %>%
- # umap_calc(row_names = "enssscg_id", n_neigh = 20, color_tissue = T)
 ```
 
 #3- Distance calculation
@@ -161,164 +153,35 @@ distances <- lapply(list("euclidean","manhattan","pearson"), function(i)
             
 save(d,
      file = "data/processed/all_distances.Rdata")
-
-
-#One distance matrix
-dist_to_cluster <-
-  pca_data$scores %>%
-  dist_calc(comp = 30, m = "euclidean")
-
-save(dist_to_cluster,
-     file = "data/processed/distance_zscore.Rdata")
-#dist_to_cluster %>%
- # fviz_dist()
-
-#dist_to_cluster %>%
- # pheatmap()
 ```
 
 #4- Clustering
 
-```{r cluster analysis}
-res_kmeans_1 <- 
-  dist_to_cluster %>%
-  clust(k = 100, m = "kmeans")
-
-results_kmeans <- results_kmeans
-class(d[[1]])
-
-
-results_kmeans <- lapply(list(1,2,3), function(i) map(d[[i]], 
-                                         ~clust(dist = .x$distance,
-                                                k = 100,
-                                                m = "fastkmeans",
-                                                genes  = gene_names,
-                                                id = .x$id)))
-
-save(results_kmeans,
-     file = "data/processed/clusterings_kmeans.Rdata")
-
-
-
-
-res$value = as.factor(res$value)
-    
-    pdf("dendogram.pdf")
-    dist %>%
-      pheatmap(annotation_row = res)
-
-    res %>%
-      fviz_dend(cex = 0.5, k = k)
-    dev.off()
-
-
-```
-
-```{r}
-
+```{r Clustering analysis}
 load("data/processed/distances.Rdata")
 load("data/processed/gene_names.Rdata")
-
 
 res_kmeansfast <- 
   distances %>%
   map(~clust(dist = .x$distance, k = 100, m = "fastkmeans", genes = gene_names, id = .x$id))
+
 save(res_kmeansfast,
      file = "data/processed/results_kmeansfast.Rdata")
 
 res_hclust <- 
   distances %>%
   map(~clust(dist = .x$distance, k = 100, m = "fasthclust", genes = gene_names,  id = .x$id))
+
 save(res_hclust,
      file = "data/processed/results_hclust.Rdata")
 
-res_hclust[[1]]$id
-
-res_fuz <- KMeans_rcpp(data = distances[[1]]$distance %>% as.matrix(), 
-                       clusters = 100, fuzzy = TRUE)
-#clust(dist = distances[[1]]$distance, k = 100, m = )
-
-
-res_kmeansfast <- 
+res_medoids <- 
   distances %>%
-  map(~clust(dist = .x$distance, k = 100, m = "fastkmeans", genes = gene_names, id = .x$id))
-save(res_kmeansfast,
-     file = "data/processed/results_kmeansfast.Rdata")
+  map(~clust(dist = .x$distance, k = 100, m = "medoids", genes = gene_names, id = .x$id))
 
-res_kmeansfast <- 
-  distances %>%
-  map(~clust(dist = .x$distance, k = 100, m = "fastkmeans", genes = gene_names, id = .x$id))
-save(res_kmeansfast,
-     file = "data/processed/results_kmeansfast.Rdata")
+save(res_medoids,
+     file = "data/processed/results_medoids.Rdata")
 
-
-res_kmeansfast <- 
-  dist_to_cluster %>%
-  clust(k = 100, m = "fastkmeans", genes = gene_names)
-
-
-res_hclust <- 
-  distances %>%
-  map(~clust(dist = .x$distance, k = 100, m = "fasthclust", genes = gene_names))
-
-res_fuzzyc1 <- 
-  distances[[1]]$distance %>%
-  clust(k = 100, m = "fuzzyc", genes = gene_names)
-      
-      
-      
-  res_hclust <- 
-  distances %>%
-  map(~clust(dist = .x$distance, k = 100, m = "fasthclust", genes = gene_names)
-      
-res_hclust <- 
-  distances %>%
-  map(~clust(dist = .x$distance, k = 100, m = "fasthclust", genes = gene_names)
-
-
-      
-
-clus_umap <- scaled_data %>%
-  umap_calc(row_names = "enssscg_id", n_neigh = 15, n_comp = 2)
-
-
-clus_umap$umap %>%
-  left_join(res_kmeansfast, by = c("features" = "gene")) %>%
-  ggplot(aes(V1,V2, color = as.factor(cluster))) +
-  geom_point() +
-  theme_minimal() +
-  coord_fixed() 
-
-res_kmeansfast %>%
-  fviz_cluster()
-
-scaled_data
-
-class(res_kmeansfast) <- "numeric"
-
-
-clust_fastkmeans <- map(distances, 
-                                         ~clust(dist = .x$distance,
-                                                k = 100,
-                                                m = "fastkmeans",
-                                                genes  = gene_names,
-                                                id = .x$id))
-
-clust_fuzzyc <-  map(distances, 
-                                         ~clust(dist = .x$distance,
-                                                k = 100,
-                                                m = "fuzzyc",
-                                                genes  = gene_names,
-                                                id = .x$id))
-
-clust_fasthclust <- map(distances, 
-                                         ~clust(dist = .x$distance,
-                                                k = 100,
-                                                m = "fasthclust",
-                                                genes  = gene_names,
-                                                id = .x$id))
-
-library(dbscan)
 
 clust_louvain <- map(distances, 
                                          ~clust(dist = .x$distance,
@@ -327,6 +190,13 @@ clust_louvain <- map(distances,
                                                 genes  = gene_names,
                                                 id = .x$id))
 
+
+clust_leiden <- map(distances, 
+                                         ~clust(dist = .x$distance,
+                                                k = 100,
+                                                m = "leiden",
+                                                genes  = gene_names,
+                                                id = .x$id))
 
 clust_dbscan <- map(distances, 
                                          ~clust(dist = .x$distance,
@@ -342,30 +212,165 @@ clust_SOM <- map(distances,
                                                 genes  = gene_names,
                                                 id = .x$id))
 
-d <-distances[[1]]
+```
 
-c <- 
-  clust(dist = d$distance, k=100, m = "louvain", genes = gene_names, id = d$id)
+```{r fuzzy tests}
 
-clust_louvain <- map(distances, 
+library(advclust)
+
+
+fuzzy <- fuzzy.CM(X = distances[[1]]$distance %>% as.matrix(), 
+                  K = 100, m = 2, max.iteration = 100, threshold = 1e-5)
+
+
+centroids <- KMeans_arma(dist %>% as.matrix(), clusters = k,
+                             n_iter = 10, seed_mode = "random_subset")
+
+res <- predict_KMeans(dist %>% as.matrix(), centroids)
+    class(res) <- "numeric"
+    
+    
+r <- KMeans_rcpp(
+  distances[[1]]$distance %>% as.matrix(),
+  clusters = 100,
+  num_init = 1,
+  max_iters = 100,
+  initializer = "kmeans++",
+  fuzzy = TRUE)
+
+
+library(e1071)
+c <-  cmeans(x = d$distance %>% as.matrix(), centers = 50,
+        method="cmeans")
+
+
+d <- distances[[1]]
+b <- d %>% as.matrix() %>% as.data.frame()
+library(RcmdrPlugin.FuzzyClust)
+
+fuzzzz <- RcmdrPlugin.FuzzyClust::fuzzy.CM(X =  d$distance %>% as.matrix() %>% as.data.frame(), K = 100, m = 2, max.iteration = 100, threshold = 10^-5,
+  RandomNumber = 0)
+Sys.time()
+
+library(advclust)
+fuzzy <- advclust::fuzzy.CM(X = d$distance %>% as.matrix(), 
+                  K = 100, m = 2, max.iteration = 100, threshold = 1e-5)
+Sys.time() # Iterations .... No
+
+res_fuz <- KMeans_rcpp(data = distances[[1]]$distance %>% as.matrix(), 
+                       clusters = 100, fuzzy = TRUE)
+
+
+res_fuzzyc1 <- 
+  distances[[1]]$distance %>%
+  clust(k = 100, m = "fuzzyc", genes = gene_names)
+      
+
+
+clust_fuzzyc <-  map(distances, 
                                          ~clust(dist = .x$distance,
                                                 k = 100,
-                                                m = "louvain",
+                                                m = "fuzzyc",
                                                 genes  = gene_names,
                                                 id = .x$id))
 
+library(ppclust)
+Sys.time()
+x <- mfpcm(x = d$distance %>% as.matrix(), centers = 100)
+Sys.time() # long time
+
+
+library(Mfuzz)
+?mfuzz
+fuzz <- mfuzz(x = distances[[1]]$distance)
+Sys.time()
+f <- fanny(x = distances[[1]]$distance, k = 100, diss = TRUE,
+      stand = FALSE, memb.exp = 1)
+Sys.time()
+
+
+library(e1071)
+a <- cshell(x = distances[[1]]$distance %>% as.matrix(), centers = 100, iter.max=10, verbose=FALSE, dist="euclidean",
+       method="cshell", m=2, radius = NULL)
+
+
+```
+
+```{r dbscan / SOM tests}
+  
+  if (m == "dbscan") {
+    res_dbscan <- 
+      dist %>%
+      dbscan::dbscan(eps = 100, minPts = 5) 
+    res <- as.numeric(res_dbscan$cluster)
+    
+  }
+  
+  if (m == "SOM") {
+    res_som <- som(dist %>% as.matrix())
+    res <- res_som$unit.classif
+  }
+
+
+res_dbscan <- distances[[1]]$distance %>% dbscan::dbscan(eps = 100, minPts = 5)
+
+res_som <- som(distances[[1]]$distance %>% as.matrix(), )
+
+# DBSCAN on 30 components
+d <- distances[[1]]
+res_dbscan <- d$distance %>% dbscan::dbscan(eps = .1, minPts = 5)
+
+# DBSCAN on 2 UMAP components
+clus_umap <- pcas[[1]]$scores %>%
+  as.data.frame() %>%
+  select(1:30) %>%
+  set_rownames(gene_names) %>%
+  rownames_to_column("enssscg_id") %>%
+  umap_calc(row_names = "enssscg_id", n_neigh = 15, n_comp = 2)
+
+dist <- dist_calc(df = clus_umap$umap,
+                  comp = 2,
+                  m = "euclidean", 
+                  id = "zscore")
+
+res_dbscan_2 <- dist$distance %>% dbscan::dbscan(eps = 0.02, minPts = 10)
+
+res1 <- as.numeric(res_dbscan$cluster)
+res2 <- as.numeric(res_dbscan_2$cluster)
+
+df<- data.frame(gene = gene_names, c1 = res1, c2 = res2)
+
+umaps[[1]]$umap %>%
+  left_join(df, by = c("features" = "gene")) %>%
+  ggplot(aes(x = V1, y = V2, color = as.factor(c2))) +
+  geom_point(show.legend = F) +
+  theme_minimal() +
+  coord_fixed() #+
+#  scale_color_manual(values = pal) 
+
+load("data/processed/pcas.Rdata")
+load("data/processed/umaps.Rdata")
+
+?som
+
+res_som2 <- som(dist$distance %>% as.matrix(), grid = somgrid(10, 10, "hexagonal")) #9
+res <- res_som$unit.classif
 ```
 
 #5- Evaluation
 
 ```{r pre-procesing}
 
-load("data/processed/clusteringshclust.Rdata")
+load("data/processed/results_kmeansfast.Rdata")
+load("data/processed/results_medoids.Rdata")
+load("data/processed/results_hclust.Rdata")
+load("data/processed/results_leiden.Rdata")
+load("data/processed/results_louvain.Rdata")
+load("data/processed/results_som.Rdata")
+
 load("data/processed/distances.Rdata")
 load("data/processed/gene_names.Rdata")
-
-# Attach random clustering to cluster list
-random <- random_cluster(100, 22007, names = gene_names)
+load("data/processed/data_scaled.Rdata")
 
 # Ortholog information
 ortholog_info <- 
@@ -376,35 +381,561 @@ ortholog_info <-
                   column="ENTREZID",
                   keytype="ENSEMBL"))
 
-# Evaluation
-res_eval_hclust <- 
-  map(c(1:9),
-         ~eval(clustering = res_hclust[[.x]]$cluster, 
-              genes = ortholog_info, 
-              dist = distances[[.x]]$distance,
-              id = res_hclust[[.x]]$id)
-         )
 
-res_eval_kmeans <- 
-  lapply(c(1:9),
-         function(i) eval(clustering = res_kmeansfast[[i]]$cluster, 
-              genes = ortholog_info, 
-              dist = distances[[i]]$distance,
-              id = res_kmeansfast[[i]]$id))
-         )
+# Attach random clustering to cluster list
+random <- random_cluster(100, 22007, names = gene_names)
+
+# Create dataframe with clustering results
+l <- list(res_hclust,res_kmeansfast,clust_medoids, clust_leiden,clust_louvain, clust_SOM)
 
 
-random_eval <- eval(clustering = random,
+df <- clusters_to_df(res_list = l, gene_names = gene_names)
+
+res <-  ### clustering id double, rep (wrong time)
+  df$cluster_results %>%
+  group_by(id) %>%
+  do({
+    data <- .
+    eval_res <- eval(clustering = data, 
+                     genes= ortholog_info,
+                     dist = distances,
+                     times = df$cluster_time
+                     #id = .$id,
+                     )
+  })
+
+eval_random <- eval(clustering= random %>% mutate(id="random"), 
                     genes = ortholog_info,
-                    dist = distances [[1]]$distance)
+                    dist=distances)
 
+
+
+
+# Attach random results
+ev <- bind_rows(res,random_eval)
+
+save(ev,
+     file = "data/processed/evaluation.Rdata")
+
+
+
+load("data/processed/evaluation.Rdata")
+
+random <- random %>% mutate (id = "random")
+
+df <- bind_rows(df,random)
+
+  r <- 
+    random %>%
+    select(gene,cluster) %>%
+    left_join(ortholog_info, by = c("gene" = "enssscg_id")) %>%
+    na.omit() %>%
+    dplyr::select(-gene) 
+
+  clusters <- as.numeric(as.character(r$cluster))
+
+  
+if(require("Biobase") && require("annotate") && require("GO.db") &&
+       require("org.Hs.eg.db")) {
+      BHI(clusters, annotation="org.Hs.eg.db", names=as.character(as.numeric(r$entrez)), category="all")
+}
+
+
+results <-res %>%
+  select(-time,-clustering_id) %>%
+  unique()
+
+
+
+
+
+
+# Pairwise ARI - cluster comparison 
+  
+clusterings <- c(df2$id,"random")
+df2 <- res %>% select(-time,-clustering_id) %>% unique()
+
+to_eval <- df$cluster_results %>% bind_rows(random %>% mutate(id = "random"))
+res_ari <- matrix(, nrow = 55, ncol = 55)
+rownames(res_ari) <- c(clusterings,"random")
+colnames(res_ari) <- c(clusterings,"random")
+
+for (i in clusterings) {
+  for (j in clusterings) {
+    a <- ARI(to_eval %>% filter(id == i) %>% pull(cluster), 
+             to_eval %>% filter(id == j) %>% pull(cluster))
+    res_ari[i,j] <- a
+    }
+  }
+
+res_ari %>%
+  pheatmap(fontsize = 5)
+
+# Scalings
+d <- c()
+for (id in clusterings) {
+  if (grepl("max",id) & !grepl("min",id)){d <- c(d,id)}
+}
+
+
+d <- c()
+for (id in clusterings) {
+  if (grepl("pearson",id)){d <- c(d,id)}
+}
+
+res_ari %>%
+  as_tibble() %>%
+  mutate(id = clusterings)%>%
+  filter(id %in% d) %>%
+  select(d) %>%
+  as.matrix() %>%
+  set_rownames(d)%>%
+  pheatmap(fontsize = 10)
+
+res_ari %>%
+  pheatmap(fontsize = 5)
+res_ari %>%
+  pheatmap(fontsize = 5)
+
+# Distances
+res_ari %>%
+  pheatmap(fontsize = 5)
+res_ari %>%
+  pheatmap(fontsize = 5)
+res_ari %>%
+  pheatmap(fontsize = 5)
+
+
+# Plots
+r %>%
+  ggplot(aes(x=id, y=dunn)) +
+  geom_bar(stat = "identity")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) #+
+#  scale_color_manual(values = pal) 
+
+#ev <- r %>%
+ # stats::dist() %>%
+  #as.matrix()
+#rownames(ev) <- r$id
+#colnames(ev) <- r$id
+
+#ev %>%
+ # pheatmap()
+
+ev %>%
+  column_to_rownames("id") %>%
+  mutate(connectivity = scale(connectivity)) %>%
+  pheatmap(cluster_cols = F)
+  
+```
+
+```{Visual evaluation - UMAPs}
+
+umap <- scaled[[1]]$scaled %>%
+  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2)
+
+umap$umap %>%
+  left_join(res_kmeansfast[[1]]$cluster, by = c("features" = "gene")) %>%
+  ggplot(aes(x = V1, y = V2, color = as.factor(value))) +
+  geom_point(show.legend = F) +
+  theme_minimal() +
+  coord_fixed() 
+
+umap_corr <- pcas[[1]]$scores %>%
+  set_rownames(gene_names) %>%
+  as.data.frame() %>%
+  select((1:30)) %>%
+  rownames_to_column("enssscg_id") %>%
+  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2, met = "correlation", color_tissue = T)
+
+umap_manhattan <- pcas[[1]]$scores %>%
+  set_rownames(gene_names) %>%
+  as.data.frame() %>%
+  select((1:30)) %>%
+  rownames_to_column("enssscg_id") %>%
+  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2, met = "manhattan", color_tissue = T)
+
+umap_euclidean <- pcas[[1]]$scores %>%
+  set_rownames(gene_names) %>%
+  as.data.frame() %>%
+  select((1:30)) %>%
+  rownames_to_column("enssscg_id") %>%
+  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2, met = "euclidean", color_tissue = T)
+
+umaps <- list(umap_euclidean,umap_manhattan,umap_corr)
+
+save(umaps,
+     file = "data/processed/umaps.Rdata")
+
+
+
+umaps[[1]]
+
+
+load("data/processed/results_leiden.Rdata")
+load("data/processed/results_louvain.Rdata")
+
+ 
+
+
+d <- dist_calc(df = umap$umap, comp = 2, m = "euclidean", 
+               id = distances[[1]]$id)
+
+c <- clust(dist = d$distance, k = 100, m = "fastkmeans", genes = gene_names, 
+           id = d$id)
+
+pal <- viridis_palette("Zissou1", 100, type = "continuous")
+require(RColorBrewer)
+brewer.pal(100, "Set2")
+
+library(viridis)
+pal <- viridis(100)
+
+library(magma)
+library(spe)
+display.brewer.pal(100, "magma")
+
+umap$umap %>%
+  left_join(clust_louvain[[1]]$cluster, by = c("features" = "gene")) %>%
+  ggplot(aes(x = V1, y = V2, color = as.factor(value))) +
+  geom_point(show.legend = F) +
+  theme_minimal() +
+  coord_fixed() +
+  scale_color_manual(values = pal) 
+
+
+  install.packages("jcolors")
+
+  pal <- colorRampPalette(jcolors::jcolors("pal8"))(130) 
+  
+  pal <- colorRampPalette(tableau_color_pal("Tableau 20"))(100) 
+
+d <- dist_calc(df = umap$umap, comp = 2, m = "euclidean", 
+               id = distances[[1]]$id)
+
+c <- clust(dist = d$distance, k = 100, m = "louvain", genes = gene_names, 
+           id = d$id)
+
+umaps[[3]]$umap %>%
+  left_join(clust_louvain[[1]]$cluster, by = c("features" = "gene")) %>%
+  ggplot(aes(x = V1, y = V2, color = as.factor(value))) +
+  geom_point(show.legend = F) +
+  theme_minimal() +
+  coord_fixed() +
+  scale_color_manual(values = pal) 
 
 
 # Plots
 
+  library(palettetown)
+  pal <- colorRampPalette(ichooseyou(pokemon = "Pichu"))(130) 
+
+install.packages("palr")
+library(palr)
+pal <- colorRampPalette(sst_pal(130))(231)
+
+library(pals)
+pal <- colorRampPalette(ocean.curl(130))(130)
+
+
+
+library(ggalt)
+load("data/processed/umaps.Rdata")
+
+
+df2 <- data.frame(value = as.numeric(medoids$cluster), gene = gene_names)
+umaps[[1]]$umap %>%
+  left_join(df2, by = c("features" = "gene")) %>%
+  ggplot(aes(V1, V2)) +
+   geom_hex(aes(fill = 1), fill = "gray90") +
+  theme_minimal() +
+  geom_encircle(aes(fill = value,
+                     color = value),
+                 alpha = 0.1,
+                 s_shape=1,
+                 expand=0,
+                 # color = "white",
+                 show.legend = F) +
+   geom_encircle(aes(color = value),
+                 fill = NA,
+                 alpha = 0.7,
+                 s_shape=1,
+                 expand=0,
+                 # color = "white",
+                 show.legend = F)# +
+#   geom_text(data = . %>%
+#               select(merged_cluster, mean_V1, mean_V2, n) %>%
+#               distinct(),
+#             aes(mean_V1, mean_V2, label = merged_cluster),
+#             show.legend = F)
   
+  
+load("data/processed/results_louvain.Rdata")
+
+df2 <- data.frame(value = as.numeric(medoids$cluster), gene = gene_names)
+
+umaps[[1]]$umap %>%
+  left_join(clust_louvain[[1]]$cluster, by = c("features" = "gene")) %>%
+  head(200) %>%
+  ggplot(aes(x = V1, y = V2, color = as.factor(value))) +
+  theme_minimal() +
+  coord_fixed() +
+  scale_color_manual(values = pal)  + 
+    scale_fill_manual(values = pal)  + 
+
+  #geom_density_2d()
+#  stat_density_2d(aes(fill = value), geom="polygon")+ 
+# stat_ellipse()
+   geom_encircle(aes(group = value, fill = as.factor(value)),
+                alpha = 0.1, 
+                s_shape=1, 
+                expand=0,
+                #fill = "gray",
+               # color = "black",
+                show.legend = F)  +
+    geom_point(show.legend = F, size = 1) 
+  #   ggplot(aes(V1, V2)) +
+#   geom_hex(aes(fill = 1),
+#            data = plot_data,
+#            fill = "gray90",
+#            bins = plot_bins) +
+#   geom_encircle(aes(fill = merged_cluster,
+#                     color = merged_cluster),
+#                 alpha = 0.1,
+#                 s_shape=1,
+#                 expand=0,
+#                 # color = "white",
+#                 show.legend = F) +
+#   geom_encircle(aes(color = merged_cluster),
+#                 fill = NA,
+#                 alpha = 0.7,
+#                 s_shape=1,
+#                 expand=0,
+#                 # color = "white",
+#                 show.legend = F) +
+#   geom_text(data = . %>%
+#               select(merged_cluster, mean_V1, mean_V2, n) %>%
+#               distinct(),
+#             aes(mean_V1, mean_V2, label = merged_cluster),
+#             show.legend = F)
+  
+  
+
+pal <- colorRampPalette(ocean.curl(50))(50)
+
+  geom_encircle(aes(group = value),
+                alpha = 0.1, 
+                s_shape=1, 
+                expand=0,
+                fill = "gray",
+                color = "black",
+                show.legend = F) 
+#+
+  #scale_color_manual(values = pal) 
+
+
+## Pairwise ARI
+
+library(aricode)
+
+ev
+  
+?ARI
+
+to_pairwise <- df %>% spread(key = id, value = cluster) %>%
+  select(-gene) %>% as_tibble()
+
+
+options <- as.list(colnames(to_pairwise))
+xy <- combn(options, 2)
+
+xy[,2][1]
+
+
+ARI(clust_leiden[[1]]$cluster$value,clust_leiden[[9]]$cluster$value)
+ARI(clust_leiden[[1]]$cluster$value,clust_leiden[[8]]$cluster$value)
+
 
 ```
 
 #6- Visualization
+
+```{r}
+load("data/processed/data_scaled.Rdata")
+load("data/processed/pcas.Rdata")
+
+pcas[[3]]$method
+
+## UMAP
+
+clus_umap <- pcas[[1]]$scores %>%
+  set_rownames(gene_names) %>%
+  as.data.frame() %>%
+  select((1:30)) %>%
+  rownames_to_column("enssscg_id") %>%
+  umap_calc(row_names = "enssscg_id", n_neigh = 15, n_comp = 2, color_tissue = T)
+
+clus_umap %>% umap_plot(color_by = "cluster", 
+                        color_groups =clust_leiden[[7]]$cluster)
+
+
+
+
+### alluvial plot? compare clustering algorithms
+
+to_all <- df %>% spread(key = id, value = cluster)  %>% as_tibble()
+
+
+ids <- c("zscore euclidean fasthclust", "zscore euclidean louvain")
+df_all <- df %>% filter(id %in% ids) %>% group_by(id,cluster)  
+t<- df_all %>% spread(key = id, value = cluster)
+e <- t %>% group_by(`zscore euclidean fasthclust`,`zscore euclidean louvain`, gene) %>% dplyr::count()
+
+ggplot(data = e,
+       aes(axis1 = `zscore euclidean fasthclust` , axis2 = `zscore euclidean louvain`,
+           y = n)) +
+  scale_x_discrete(limits = c("Cluster", "Panel"), expand = c(.2, .05)) +
+  geom_alluvium(aes(fill = as.factor(`zscore euclidean fasthclust`)), show.legend = F) +
+  geom_stratum() +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  theme(axis.text.x = element_text(size = 18, face = "bold"),
+            axis.text.y = element_blank(),
+            axis.ticks = element_blank(),
+            panel.background = element_blank(),
+            axis.title = element_blank())  +
+    coord_flip()
+
+
+
+library(ggalt)
+library(ggalluvial)
+ggplot(data = df_all,
+       aes(axis1 = id, axis2 = gene)) +
+  scale_x_discrete(limits = 
+                     c("max euclidean fastkmeans", "max euclidean fasthclust"), 
+                   expand = c(.2, .05)) +
+  geom_alluvium(aes()) + #fill= gene)
+  geom_stratum() #+
+  geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  theme(axis.text.x = element_text(size = 18, face = "bold"),
+            axis.text.y = element_blank(),
+            axis.ticks = element_blank(),
+            panel.background = element_blank(),
+            axis.title = element_blank()) 
+
+
+```
+
+
+
+```{r}
+umap <- pcas[[1]]$scores %>%
+  set_rownames(gene_names) %>%
+  as.data.frame() %>%
+  select((1:30)) %>%
+  rownames_to_column("enssscg_id") %>%
+  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2)
+
+
+umap_corr <- pcas[[1]]$scores %>%
+  set_rownames(gene_names) %>%
+  as.data.frame() %>%
+  select((1:30)) %>%
+  rownames_to_column("enssscg_id") %>%
+  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2, met = "correlation", color_tissue = T)
+
+umap_manhattan <- pcas[[1]]$scores %>%
+  set_rownames(gene_names) %>%
+  as.data.frame() %>%
+  select((1:30)) %>%
+  rownames_to_column("enssscg_id") %>%
+  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2, met = "manhattan", color_tissue = T)
+
+umap_euclidean <- pcas[[1]]$scores %>%
+  set_rownames(gene_names) %>%
+  as.data.frame() %>%
+  select((1:30)) %>%
+  rownames_to_column("enssscg_id") %>%
+  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2, met = "euclidean", color_tissue = T)
+
+umaps <- list(umap_euclidean,umap_manhattan,umap_corr)
+
+save(umaps,
+     file = "data/processed/umaps.Rdata")
+
+
+
+
+
+
+load("data/processed/results_leiden.Rdata")
+load("data/processed/results_louvain.Rdata")
+
+ 
+
+
+d <- dist_calc(df = umap$umap, comp = 2, m = "euclidean", 
+               id = distances[[1]]$id)
+
+c <- clust(dist = d$distance, k = 100, m = "fastkmeans", genes = gene_names, 
+           id = d$id)
+
+pal <- viridis_palette("Zissou1", 100, type = "continuous")
+require(RColorBrewer)
+brewer.pal(100, "Set2")
+
+library(viridis)
+pal <- viridis(100)
+
+library(magma)
+library(spe)
+display.brewer.pal(100, "magma")
+
+umap$umap %>%
+  left_join(clust_louvain[[1]]$cluster, by = c("features" = "gene")) %>%
+  ggplot(aes(x = V1, y = V2, color = as.factor(value))) +
+  geom_point(show.legend = F) +
+  theme_minimal() +
+  coord_fixed() +
+  scale_color_manual(values = pal) 
+
+
+  install.packages("jcolors")
+
+  pal <- colorRampPalette(jcolors::jcolors("pal8"))(130) 
+  
+  pal <- colorRampPalette(tableau_color_pal("Tableau 20"))(100) 
+
+d <- dist_calc(df = umap$umap, comp = 2, m = "euclidean", 
+               id = distances[[1]]$id)
+
+c <- clust(dist = d$distance, k = 100, m = "louvain", genes = gene_names, 
+           id = d$id)
+
+umaps[[3]]$umap %>%
+  left_join(clust_louvain[[1]]$cluster, by = c("features" = "gene")) %>%
+  ggplot(aes(x = V1, y = V2, color = as.factor(value))) +
+  geom_point(show.legend = F) +
+  theme_minimal() +
+  coord_fixed() +
+  scale_color_manual(values = pal) 
+
+
+# Plots
+
+library(palettetown)
+pal <- colorRampPalette(ichooseyou(pokemon = "Pichu"))(130) 
+
+install.packages("palr")
+library(palr)
+pal <- colorRampPalette(sst_pal(130))(231)
+
+library(pals)
+pal <- colorRampPalette(ocean.curl(130))(130)
+
+
+
+```
+
 #7- Annotation
+
