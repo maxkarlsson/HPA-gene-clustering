@@ -165,8 +165,17 @@ res_kmeansfast <-
   distances %>%
   map(~clust(dist = .x$distance, k = 100, m = "fastkmeans", genes = gene_names, id = .x$id))
 
-save(res_kmeansfast,
-     file = "data/processed/results_kmeansfast.Rdata")
+
+res_kmeansfast <- 
+  
+kmeans_multk <- 
+  lapply(list(50,75,100,125,150), function(i)
+  map(distances, ~clust(dist = .x$distance, k = as.numeric(i), 
+                        m = "fastkmeans", genes = gene_names, id = .x$id, mult_k = T)))
+
+
+save(kmeans_multk,
+     file = "data/processed/results_kmeansfast_multk.Rdata")
 
 res_hclust <- 
   distances %>%
@@ -298,20 +307,6 @@ a <- cshell(x = distances[[1]]$distance %>% as.matrix(), centers = 100, iter.max
 
 ```{r dbscan / SOM tests}
   
-  if (m == "dbscan") {
-    res_dbscan <- 
-      dist %>%
-      dbscan::dbscan(eps = 100, minPts = 5) 
-    res <- as.numeric(res_dbscan$cluster)
-    
-  }
-  
-  if (m == "SOM") {
-    res_som <- som(dist %>% as.matrix())
-    res <- res_som$unit.classif
-  }
-
-
 res_dbscan <- distances[[1]]$distance %>% dbscan::dbscan(eps = 100, minPts = 5)
 
 res_som <- som(distances[[1]]$distance %>% as.matrix(), )
@@ -359,15 +354,13 @@ res <- res_som$unit.classif
 
 #5- Evaluation
 
-```{r pre-procesing}
-
+```{r load data}
 load("data/processed/results_kmeansfast.Rdata")
 load("data/processed/results_medoids.Rdata")
 load("data/processed/results_hclust.Rdata")
 load("data/processed/results_leiden.Rdata")
 load("data/processed/results_louvain.Rdata")
 load("data/processed/results_som.Rdata")
-
 load("data/processed/distances.Rdata")
 load("data/processed/gene_names.Rdata")
 load("data/processed/data_scaled.Rdata")
@@ -381,14 +374,15 @@ ortholog_info <-
                   column="ENTREZID",
                   keytype="ENSEMBL"))
 
+```
 
+```{r generate lists of clusters and evaluate} 
 # Attach random clustering to cluster list
 random <- random_cluster(100, 22007, names = gene_names)
 
+
 # Create dataframe with clustering results
 l <- list(res_hclust,res_kmeansfast,clust_medoids, clust_leiden,clust_louvain, clust_SOM)
-
-
 df <- clusters_to_df(res_list = l, gene_names = gene_names)
 
 res <-  ### clustering id double, rep (wrong time)
@@ -408,23 +402,17 @@ eval_random <- eval(clustering= random %>% mutate(id="random"),
                     genes = ortholog_info,
                     dist=distances)
 
-
-
+load("data/processed/eval_random.Rdata")
 
 # Attach random results
-ev <- bind_rows(res,random_eval)
+ev <- bind_rows(results,eval_random %>% dplyr::rename(id = clustering_id))
 
 save(ev,
      file = "data/processed/evaluation.Rdata")
 
+```
 
-
-load("data/processed/evaluation.Rdata")
-
-random <- random %>% mutate (id = "random")
-
-df <- bind_rows(df,random)
-
+```{r test BHI}
   r <- 
     random %>%
     select(gene,cluster) %>%
@@ -440,25 +428,18 @@ if(require("Biobase") && require("annotate") && require("GO.db") &&
       BHI(clusters, annotation="org.Hs.eg.db", names=as.character(as.numeric(r$entrez)), category="all")
 }
 
-
-results <-res %>%
-  select(-time,-clustering_id) %>%
-  unique()
+```
 
 
-
-
-
-
+```{r pairwise ARI}
 # Pairwise ARI - cluster comparison 
-  
-clusterings <- c(df2$id,"random")
-df2 <- res %>% select(-time,-clustering_id) %>% unique()
 
+df2 <- res %>% select(-time,-clustering_id) %>% unique()
+clusterings <- c(df2$id,"random")
 to_eval <- df$cluster_results %>% bind_rows(random %>% mutate(id = "random"))
 res_ari <- matrix(, nrow = 55, ncol = 55)
-rownames(res_ari) <- c(clusterings,"random")
-colnames(res_ari) <- c(clusterings,"random")
+rownames(res_ari) <- c(clusterings)
+colnames(res_ari) <- c(clusterings)
 
 for (i in clusterings) {
   for (j in clusterings) {
@@ -524,9 +505,73 @@ r %>%
 
 ev %>%
   column_to_rownames("id") %>%
-  mutate(connectivity = scale(connectivity)) %>%
+  mutate(connectivity_index = scale(connectivity_index)) %>%
   pheatmap(cluster_cols = F)
-  
+
+ev_minmax <- 
+  ev %>%
+  left_join(df$cluster_time %>% bind_rows(data.frame(id = "random", time = 1))) %>%
+  column_to_rownames("id") %>%
+  mutate(min = min(connectivity_index),
+         max = max(connectivity_index),
+         connectivity = (connectivity_index - min)/(max-min)) %>%
+  select(connectivity,dunn_index,BHI_index, time) %>%
+  mutate(min = min(dunn_index),
+         max = max(dunn_index),
+         dunn = (dunn_index - min)/(max-min)) %>%
+  select(connectivity,dunn,BHI_index, time) %>%
+  mutate(min = min(BHI_index),
+         max = max(BHI_index),
+         BHI = (BHI_index - min)/(max-min)) %>%
+  select(connectivity,dunn,BHI, time) %>%
+   mutate(min = min(time),
+         max = max(time),
+         time = (time - min)/(max-min)) %>%
+  select(connectivity,dunn,BHI, time) 
+  #mutate(sum_connectivity = scale(connectivity_index)) %>%
+
+ev_minmax %>% 
+  pheatmap(cluster_cols = F)
+
+
+### UMAP clusterings
+
+ev_umap <- 
+  ev_minmax %>%
+  select(-time) %>%
+  rownames_to_column("id") %>%
+  umap_calc(row_names = "id", n_neigh = 15, n_comp = 2)
+
+
+scaling <- c()
+distance <- c()
+clustering <- c()
+
+for (row in 1:nrow(ev_umap)) {
+  elements <- strsplit(ev_umap[[row, "features"]], " ")
+  scaling <- c(scaling, elements[[1]][1])
+  distance <- c(distance, elements[[1]][2])
+  clustering <- c(clustering, elements[[1]][3])
+}
+
+ev_umap_colors <-
+  ev_umap %>%
+  mutate(scaling = scaling,
+         distance = distance,
+         clustering = clustering)
+
+
+ev_umap %>% 
+  ggplot(aes(V1,V2, color =scaling)) +
+      geom_point() +
+      theme_minimal()+
+      coord_fixed()
+#color = viridis(10)
+
+ev %>%
+  column_to_rownames("id") %>%
+  pheatmap() 
+
 ```
 
 ```{Visual evaluation - UMAPs}
@@ -758,13 +803,61 @@ ARI(clust_leiden[[1]]$cluster$value,clust_leiden[[8]]$cluster$value)
 
 ```
 
+
+```{r}
+
+ev$rank_connectivity <-rank(-(ev$connectivity_index))
+ev$rank_dunn <-rank((ev$dunn_index))
+ev$rank_BHI <-rank(-(ev$BHI_index))
+
+rank_eval <- ev %>% left_join(df$cluster_time %>% drop_na())
+rank_eval$rank_time <-rank(rank_eval$time)
+
+rank_eval %>%
+  select(id,rank_connectivity, rank_dunn, rank_BHI, rank_time) %>%
+  column_to_rownames("id") %>%
+  pheatmap(cluster_cols = F, fontsize = 7, border_color = NA, 
+           cutree_rows = 5, clustering_method = "ward.D2", 
+           color = colorRampPalette(c("#00846b","white"))(100))
+
+ev2 <- ev %>%
+  select(id, connectivity_index, dunn_index, )
+
+scaling <- c()
+distance <- c()
+clustering <- c()
+
+for (row in 1:nrow(rank_eval)) {
+  elements <- strsplit(rank_eval[[row, "id"]], " ")
+  scaling <- c(scaling, elements[[1]][1])
+  distance <- c(distance, elements[[1]][2])
+  clustering <- c(clustering, elements[[1]][3])
+}
+
+rank_eval$scaling <- scaling
+rank_eval$distance <- distance
+rank_eval$clustering <- clustering
+
+rank_eval$scale_dist <- paste(scaling,distance)
+
+rank_eval %>%
+  as_tibble() %>%
+  select(-id) %>%
+  select(clustering, scale_dist, rank_dunn) %>%
+  spread(key = scale_dist, value = rank_dunn) %>% 
+  drop_na(clustering) %>%
+  select(-`random NA`)%>%
+  as.data.frame() %>%
+  column_to_rownames("clustering") %>%
+  pheatmap()
+
+```
+
 #6- Visualization
 
 ```{r}
 load("data/processed/data_scaled.Rdata")
 load("data/processed/pcas.Rdata")
-
-pcas[[3]]$method
 
 ## UMAP
 
@@ -773,8 +866,10 @@ clus_umap <- pcas[[1]]$scores %>%
   as.data.frame() %>%
   select((1:30)) %>%
   rownames_to_column("enssscg_id") %>%
-  umap_calc(row_names = "enssscg_id", n_neigh = 15, n_comp = 2, color_tissue = T)
+  umap_calc(row_names = "enssscg_id", n_neigh = 15, n_comp = 2)
 
+clus_umap %>% umap_plot(color_by = "density")
+                        
 clus_umap %>% umap_plot(color_by = "cluster", 
                         color_groups =clust_leiden[[7]]$cluster)
 
