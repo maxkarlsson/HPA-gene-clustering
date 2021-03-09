@@ -2,8 +2,14 @@
 # Create random clustering
 
 random_cluster <- function (k,l, names) {
+  start_time <- Sys.time()
   cluster <- sample(1:k, l, replace = T)
-  return(data.frame(gene = names, cluster = cluster))
+  end_time <- Sys.time()
+  total_time <- end_time - start_time
+  
+  return(list(cluster = data.frame(gene = names, value = cluster),
+              time = total_time,
+              id = "random"))
 }
 
 # Transform results to dataframe
@@ -18,8 +24,8 @@ clusters_to_df <- function (res_list, gene_names) {
                                 cluster = as.numeric(as.character(res$cluster$value)))
       df <- bind_rows(df, new_entries)
       times <- bind_rows(times, data.frame(
-                                id = res$id,
-                                time = as.numeric(res$time, units = "secs")))
+        id = res$id,
+        time = as.numeric(res$time, units = "secs")))
     }
   }
   return(list(cluster_results = df, cluster_time = times))
@@ -27,10 +33,11 @@ clusters_to_df <- function (res_list, gene_names) {
 
 # Evaluation 
 
-eval <- function(clustering, genes, dist, times) { # add distance # , t, id = NULL
+eval <- function(clustering, genes, dist) { # add distance # , t, id = NULL #times
   
-  id <- unique(clustering$id)
-
+  #id <- unique(clustering$id)
+  id <- clustering$id
+  
   if (grepl("zscore euclidean",id)){d <- dist[[1]]$distance}
   if (grepl("min-max euclidean",id)){d <- dist[[2]]$distance}
   if (grepl("max euclidean",id)){d <- dist[[3]]$distance}
@@ -44,45 +51,34 @@ eval <- function(clustering, genes, dist, times) { # add distance # , t, id = NU
   
   
   r <- 
-    clustering %>%
-    select(gene,cluster) %>%
+    clustering$cluster %>%
+    select(gene,value) %>%
     left_join(genes, by = c("gene" = "enssscg_id")) %>%
     na.omit() %>%
     dplyr::select(-gene) 
   
-  clusters <- as.numeric(as.character(r$cluster))
+  clusters <- as.numeric(as.character(r$value))
   
   con_index <-
-    connectivity(distance = d, cluster = as.numeric(as.character(clustering$cluster)))
+    connectivity(distance = d, cluster = as.numeric(as.character(clustering$cluster$value)))
   
   dunn_index <- 
-    dunn(distance = d, cluster = as.numeric(as.character(clustering$cluster)))
+    dunn(distance = d, cluster = as.numeric(as.character(clustering$cluster$value)))
   
   bio_index <- 
     if(require("Biobase") && require("annotate") && require("GO.db") &&
        require("org.Hs.eg.db")) {
       BHI(clusters, annotation="org.Hs.eg.db", names=r$entrez, category="all") 
-    }l
+    }
   
-  t <- times %>%
-    filter(id == id) %>%
-    pull(time)
+  # t <- times %>%
+  #  filter(id == id) %>%
+  # pull(time)
   
-  #if(!is.null(unique(id))) {
-    return(data.frame(clustering_id = id,
-                      connectivity_index = con_index,
-                      dunn_index = dunn_index,
-                      BHI_index = bio_index,
-                      time = t
-                      ))
-  #}
-  
-  #else {
-  #  return(data.frame(connectivity = con_index,
-  #                    dunn = dunn_index,
-  #                    BHI = bio_index,
-  #                    time = as.numeric(time, units = "secs")
-  #                    ))
-  #}
-
+  return(data.frame(clustering_id = id,
+                    connectivity_index = con_index,
+                    dunn_index = dunn_index,
+                    BHI_index = bio_index,
+                    time = clustering$time
+  ))
 }
