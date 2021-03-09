@@ -27,7 +27,7 @@ dist_calc <- function(df,comp,m,id=NULL) {
 
 # Clusteirng function
 
-clust <- function(dist, k = 10, m, genes, id = NULL) {
+clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F) {
   start_time <- Sys.time()
   
   if (m %in% c("kmeans", "pam", "clara", "fanny", "hclust", "agnes", "diana")) {
@@ -131,8 +131,13 @@ clust <- function(dist, k = 10, m, genes, id = NULL) {
                 time = total_time,
                 id = paste(id,m)))
   }
+  if(mult_k == T) {
+    return(list(cluster = res,
+                time = total_time,
+                id = paste(id,m,k)))
+  }
   else {
     return(list(cluster = res,
                 time = total_time))
     }
-  }
+}
