@@ -99,8 +99,8 @@ gene_names <-
   spread(key = sample_ID , value = tpm) %$%
   enssscg_id
 
-save(gene_names,
-     file = "data/processed/gene_names.Rdata")
+#save(gene_names,
+ #    file = "data/processed/gene_names.Rdata")
 
 # Normalize
 tmm_data <- 
@@ -112,7 +112,7 @@ tmm_data <-
 
 
 # Scale data
-scaled <- list("zscore","min-max","max") %>%
+scaled <- list("zscore","max") %>% #"min-max",
   map(~data_scaling(df = tmm_data, col_value = "tmm",
                     col_gene = "enssscg_id", col_sample = "sample_ID",
                     log_transform = F, m = .x))
@@ -124,13 +124,13 @@ scaled <- list("zscore","min-max","max") %>%
 ```{r dimensionality reduction}
 
 #All PCAs
-load("data/processed/scaled_data.Rdata")
+#load("data/processed/scaled_data.Rdata")
 
 pcas <- scaled %>%
   map(~pca_calc(data = .x$scaled, npcs = 200, m = .x$method))
 
-save(pcas,
-     file = "data/processed/pcas.Rdata")
+#save(pcas,
+ #    file = "data/processed/pcas.Rdata")
 
 ```
 
@@ -139,12 +139,12 @@ save(pcas,
 ```{r distance calculation}
 
 #All distances
-distances <- lapply(list("euclidean","manhattan","pearson"), function(i)
+distances <- lapply(list("euclidean","pearson"), function(i) #"manhattan",
   map(pcas, ~dist_calc(df = .x$scores, comp = 30, m = i, 
                        id = .x$method)))
             
-save(d,
-     file = "data/processed/all_distances.Rdata")
+#save(d,
+ #    file = "data/processed/all_distances.Rdata")
 ```
 
 #4- Clustering
@@ -152,6 +152,8 @@ save(d,
 ```{r Clustering analysis}
 load("data/processed/distances.Rdata")
 load("data/processed/gene_names.Rdata")
+
+d <- list(distances[[1]][[1]],distances[[1]][[2]],distances[[2]][[1]],distances[[2]][[2]])
 
 res_kmeansfast <- 
   distances %>%
@@ -161,13 +163,24 @@ res_kmeansfast <-
 res_kmeansfast <- 
   
 kmeans_multk <- 
-  lapply(list(50,75,100,125,150), function(i)
-  map(distances, ~clust(dist = .x$distance, k = as.numeric(i), 
+  lapply(list(50,70,90,110,130,150), function(i)
+  map(d, ~clust(dist = .x$distance, k = as.numeric(i), 
                         m = "fastkmeans", genes = gene_names, id = .x$id, mult_k = T)))
 
+kmeans_fasthclust <- 
+  lapply(list(50,70,90,110,130,150), function(i)
+  map(d, ~clust(dist = .x$distance, k = as.numeric(i), 
+                        m = "fasthclust", genes = gene_names, id = .x$id, mult_k = T)))
+
+
+
+
+
+
+kmeans_multk[[6]][[4]]$id
 
 save(kmeans_multk,
-     file = "data/processed/results_kmeansfast_multk.Rdata")
+     file = "data/processed/results_kmeansfast_multk_2.Rdata")
 
 res_hclust <- 
   distances %>%
@@ -373,22 +386,68 @@ ortholog_info <-
 random <- random_cluster(100, 22007, names = gene_names)
 
 
-# Create dataframe with clustering results
-l <- list(res_hclust,res_kmeansfast,clust_medoids, clust_leiden,clust_louvain, clust_SOM)
-df <- clusters_to_df(res_list = l, gene_names = gene_names)
+id <- "random"
+id <- "zscore euclidean"
+id <- "zscore pearson"
+id <- "max euclidean"
+id <- "max pearson"
 
-res <-  ### clustering id double, rep (wrong time)
-  df$cluster_results %>%
-  group_by(id) %>%
-  do({
-    data <- .
+
+
+
+
+
+
+# Create dataframe with clustering results
+l <- c(res_hclust,res_kmeansfast,clust_medoids, clust_leiden,clust_louvain, clust_SOM, list(random))
+
+eval_res <- map(l, ~eval(clustering = .x, 
+                     genes= ortholog_info,
+                     dist = distances
+                     ))
+df2 <- data.frame()
+for (eval in eval_res) {
+  df2 <- bind_rows(df2,eval)
+}
+
+df2 <- df2 %>% mutate(time = as.numeric(time, units = "secs"))
+ev_res <- df2
+
+
+l_hclust <- c()
+for (i in c(1:6)){
+  l_hclust <- c(l_hclust,kmeans_fasthclust[[i]])
+}
+
+l_hclust[[1]]$id
+
+load("data/processed/results_kmeansfast_multk_2.Rdata")
+
+
+eval_hclust <- map(l_hclust, ~eval(clustering = .x, 
+                     genes= ortholog_info,
+                     dis = d
+                     ))
+
+df_eval_hclust <- data.frame()
+for (eval in eval_hclust) {
+  df_eval_hclust <- bind_rows(df_eval_hclust,eval)
+}
+df_eval_hclust <- df_eval_hclust %>% mutate(time = as.numeric(time, units = "secs"))
+
+
+#res <-  ### clustering id double, rep (wrong time)
+ # df$cluster_results %>%
+  #group_by(id) %>%
+  #do({
+   # data <- .
     eval_res <- eval(clustering = data, 
                      genes= ortholog_info,
                      dist = distances,
                      times = df$cluster_time
                      #id = .$id,
                      )
-  })
+  #})
 
 eval_random <- eval(clustering= random %>% mutate(id="random"), 
                     genes = ortholog_info,
@@ -396,28 +455,67 @@ eval_random <- eval(clustering= random %>% mutate(id="random"),
 
 load("data/processed/eval_random.Rdata")
 
+
 # Attach random results
 ev <- bind_rows(results,eval_random %>% dplyr::rename(id = clustering_id))
 
-save(ev,
-     file = "data/processed/evaluation.Rdata")
+save(ev_res,
+     file = "data/processed/ev_res.Rdata")
 
 ```
 
 ```{r test BHI}
-  r <- 
+r <- 
     random %>%
     select(gene,cluster) %>%
     left_join(ortholog_info, by = c("gene" = "enssscg_id")) %>%
     na.omit() %>%
     dplyr::select(-gene) 
 
-  clusters <- as.numeric(as.character(r$cluster))
+clusters <- as.numeric(as.character(r$cluster))
+length(clusters)
 
-  
+test <- rep(c(1),times=147)
+test2 <- c(1:147)
+
+x <- org.Hs.egGO
+library(org.Hs.egGO)
 if(require("Biobase") && require("annotate") && require("GO.db") &&
        require("org.Hs.eg.db")) {
-      BHI(clusters, annotation="org.Hs.eg.db", names=as.character(as.numeric(r$entrez)), category="all")
+      BHI(as.numeric(as.character(test)), annotation= "org.Hs.eg.db", 
+          names=as.character(as.numeric(r$entrez)), category="all")
+}
+
+r
+
+goTerms <- annotate::getGO(as.character(as.numeric(r$entrez)), "org.Hs.eg.db")
+  goTerms <- annotate::getGO(names, annotation)
+
+bhi <- tapply(goTerms, as.numeric(as.character(r$cluster)),
+              function(x) matchGO(x, "all"))
+
+v <- c()
+e <- tapply(goTerms, as.numeric(as.character(r$cluster)),
+              function(x) c(v,x))
+
+org.Hs.egGO
+
+data(mouse)
+express <- mouse[1:25,c("M1","M2","M3","NC1","NC2","NC3")]
+rownames(express) <- mouse$ID[1:25]
+## hierarchical clustering
+Dist <- dist(express,method="euclidean")
+clusterObj <- hclust(Dist, method="average")
+nc <- 6 ## number of clusters
+cluster <- cutree(clusterObj,nc)
+
+
+library(moe430a.db)
+
+if(require("Biobase") && require("annotate") && require("GO.db") &&
+require("moe430a.db")) {
+BHI(as.numeric(as.character(cluster)), 
+    annotation="moe430a.db", names=rownames(express), category="all")
 }
 
 ```
@@ -599,6 +697,103 @@ rank_eval %>%
   column_to_rownames("clustering") %>%
   pheatmap()
 
+
+load("data/processed/ev_multk.Rdata")
+load("data/processed/ev_res.Rdata")
+
+ev_res$rank_connectivity <-rank((ev_res$connectivity_index))
+ev_res$rank_dunn <-rank(-(ev_res$dunn_index))
+ev_res$rank_BHI <-rank(-(ev_res$BHI_index))
+ev_res$rank_time <-rank(ev_res$time)
+
+ev_res %>%
+  select(clustering_id,rank_connectivity, rank_dunn, rank_BHI, rank_time) %>%
+  column_to_rownames("clustering_id") %>%
+  pheatmap(cluster_cols = F, fontsize = 7, border_color = NA, 
+           cutree_rows = 5, clustering_method = "ward.D2", 
+           color = colorRampPalette(c("#00846b","white"))(100))
+
+
+
+
+df_eval_hclust$rank_connectivity <-rank((df_eval_hclust$connectivity_index))
+df_eval_hclust$rank_dunn <-rank(-(df_eval_hclust$dunn_index))
+df_eval_hclust$rank_BHI <-rank(-(df_eval_hclust$BHI_index))
+df_eval_hclust$rank_time <-rank(df_eval_hclust$time)
+
+
+
+
+df_eval_hclust$k <- c(50,50,50,50,70,70,70,70,90,90,90,90,110,110,110,110,130,130,130,130,150,150,150,150)
+df_eval_hclust$id <- c(50,50,50,50,70,70,70,70,90,90,90,90,110,110,110,110,130,130,130,130,150,150,150,150)
+
+for (i in (1:nrow(df_eval_hclust))) {
+  df_eval_hclust$id[i] <- paste(df_eval_hclust$clustering_id[i],df_eval_hclust$k[i])
+}
+
+df_eval_hclust %>%
+  select(id,rank_connectivity, rank_dunn, rank_BHI, rank_time) %>%
+  column_to_rownames("id") %>%
+  pheatmap(cluster_cols = F, fontsize = 7, border_color = NA, 
+           cutree_rows = 5, clustering_method = "ward.D2", 
+           color = colorRampPalette(c("#00846b","white"))(100))
+
+bestk <- 
+  df_eval_hclust %>%
+  mutate(total_rank = rank_connectivity + rank_dunn + rank_BHI) %>%
+  mutate(id = gsub('[[:digit:]]+', '', clustering_id)) %>%
+  group_by(id) %>%
+  mutate(min = (min(total_rank))) %>%
+  filter(total_rank == min)
+
+all_best <- data.frame()
+
+for (df in dfs) {
+  b <- bestk %>%
+    select(-rank_connectivity, -rank_dunn, -rank_BHI, -rank_time,-min,-total_rank, -k, -clustering_id)
+  all_best <- bind_rows(all_best,b)
+}
+  
+```
+
+```{r}
+to_plot <- df_eval_hclust %>%
+  as_tibble() %>%
+  mutate(id = gsub('[[:digit:]]+', '', clustering_id)) %>%
+#  filter(id == "zscore euclidean fasthclust ") %>%
+  select(id,k,connectivity_index,dunn_index,BHI_index,time) %>%
+  gather(key = measure, value = value, connectivity_index:time) 
+
+#%>%
+  group_by(id) %>%
+  do ({
+    data <- .
+    
+    data %>%
+      ggplot(aes(x=k, y=value)) +
+      geom_point() +
+      geom_line() +# coord_fixed() +
+      theme_minimal() +
+      facet_wrap(~measure, scales="free_y")
+  })
+
+plots <-
+  lapply(unique(to_plot$id),
+         function(i) {
+           to_plot %>%
+             filter(id == i)%>%
+      ggplot(aes(x=k, y=value)) +
+      geom_point() +
+      geom_line() +# coord_fixed() +
+      theme_minimal() +
+      facet_wrap(~measure, scales="free_y")
+         })
+
+
+pdf("ev.pdf")
+plots
+dev.off()
+
 ```
 
 #6- Visualization
@@ -607,6 +802,9 @@ rank_eval %>%
 load("data/processed/data_scaled.Rdata")
 load("data/processed/pcas.Rdata")
 
+clustering <- kmeans_multk[[1]][[1]]$cluster
+
+clustering <- clust_louvain[[1]]$cluster
 ## UMAP
 
 clus_umap <- pcas[[1]]$scores %>%
@@ -616,8 +814,171 @@ clus_umap <- pcas[[1]]$scores %>%
   rownames_to_column("enssscg_id") %>%
   umap_calc(row_names = "enssscg_id", n_neigh = 15, n_comp = 2)
 
-clus_umap %>% umap_plot(color_by = "density")
+clus_umap %>% umap_plot()
                         
+clus_umap %>% 
+  left_join(clustering %>% 
+              dplyr::rename(features = 1, 
+                            cluster = 2)) %>% 
+  mutate(cluster = factor(cluster)) %>%
+  ggplot(aes(V1, V2, fill = cluster, color = cluster)) +
+  geom_point(size = 0.1) +
+  stat_density2d(bins = 2, h = 2) +
+  theme_bw()
+
+
+geom_density_2d(bins = 2, )
+  geom_density2d_filled(bins = 20)
+
+
+
+#
+
+## Hexagonal
+  getmode <- function(v) {
+  uniqv <- unique(v)
+  as.character(uniqv[which.max(tabulate(match(v, uniqv)))])
+}
+clus_umap %>% 
+  left_join(clustering %>% 
+              dplyr::rename(features = 1, 
+                            cluster = 2)) %>% 
+  mutate(cluster = factor(cluster)) %>%
+  ggplot(aes(V1, V2, z = cluster, group = 1)) +
+  stat_summary_hex(fun = getmode,
+                   bins = 100,
+                   show.legend = F)
+## Density
+clus_umap %>% 
+  left_join(clustering %>% 
+              dplyr::rename(features = 1, 
+                            cluster = 2)) %>% 
+  mutate(cluster = factor(cluster)) %>%
+  ggplot(aes(V1, V2, group=cluster)) +
+  geom_density2d_filled(h = 10) +
+  facet_wrap(~cluster)
+
+
+#######
+
+density_settings <-
+  expand.grid(n = c(100),
+              h = c(0.02, 0.05, 0.1, 0.2)) %>% 
+  as_tibble()
+
+clus_umap_density_all <- 
+  density_settings %>% 
+  group_by_all() %>% 
+  do({
+    h <- .$h
+    n <- .$n
+    
+    clus_umap %>% 
+      left_join(clustering %>% 
+                  dplyr::rename(features = 1, 
+                                cluster = 2)) %>% 
+      mutate(cluster = factor(cluster)) %>%
+      group_by(cluster) %>%
+      do ({
+        data <- .
+        data %$%
+          MASS::kde2d(V1, V2, n = n, h = h, lims = c(range(clus_umap$V1), range(clus_umap$V2))) %>%
+          {.$z} %>%
+          as_tibble(rownames = "x") %>%
+          gather(y, density, -1) %>%
+          mutate(y = gsub("V", "", y),
+                 x = as.numeric(x),
+                 y = as.numeric(y))
+      })
+  })
+clus_umap_density <-
+  clus_umap %>% 
+  left_join(clustering %>% 
+              dplyr::rename(features = 1, 
+                            cluster = 2)) %>% 
+  mutate(cluster = factor(cluster)) %>%
+  group_by(cluster) %>%
+  do ({
+    data <- .
+    data %$%
+      MASS::kde2d(V1, V2, n = 300, h = 0.1, lims = c(range(clus_umap$V1), range(clus_umap$V2))) %>%
+      {.$z} %>%
+      as_tibble(rownames = "x") %>%
+      gather(y, density, -1) %>%
+      mutate(y = gsub("V", "", y),
+             x = as.numeric(x),
+             y = as.numeric(y))
+  })
+
+clus_umap_density %>%
+  
+  mutate(x = scales::rescale(x, range(clus_umap$V1)),
+         y = scales::rescale(y, range(clus_umap$V2))) %>%
+  group_by(cluster) %>%
+  mutate(density = density/max(density)) %>%
+  ungroup () %>%
+  filter(density > 0.01) %>%
+  ggplot(aes(x,y,fill = cluster, alpha = density)) +
+  
+  geom_point(data = clus_umap,
+             aes(V1, V2),
+             size = 0.1,
+             inherit.aes = F) + 
+  geom_tile() +
+  theme_bw() +
+  scale_alpha_continuous(limits = c(0, 0.3), range = c(0.1, 0.6))
+
+
+clus_umap_density %>%
+  
+  mutate(x = scales::rescale(x, range(clus_umap$V1)),
+         y = scales::rescale(y, range(clus_umap$V2))) %>%
+  group_by(cluster) %>%
+  mutate(density = density/max(density)) %>%
+  ungroup () %>%
+  filter(density > 0.01) %>%
+  ggplot(aes(x,y,fill = cluster, alpha = density)) 
+  
+clus_umap %>%
+  ggplot() +
+  geom_point(aes(V1, V2),
+             size = 0.1,
+             inherit.aes = F)
+
+clus_umap_density %>%
+  
+  mutate(x = scales::rescale(x, range(clus_umap$V1)),
+         y = scales::rescale(y, range(clus_umap$V2))) %>%
+  group_by(cluster) %>%
+  mutate(density = density/max(density)) %>%
+  ungroup () %>%
+  filter(density > 0.005) %>%
+  ggplot(aes(x,y,fill = cluster)) +
+  geom_tile() +
+  theme_bw() 
+  
+clus_umap %>%
+  ggplot() +
+  geom_point(aes(V1, V2),
+             size = 0.1,
+             inherit.aes = F)
+
+
+clus_umap_density %>%
+  filter(density > 0.1) %>% 
+  group_by(x, y) %>%
+  count %>% 
+  group_by(n) %>% 
+  count
+
+
+# clus_umap_density %>%
+#   filter(density>0.01) 
+#   ggplot(aes(density)) +
+#   geom_density() 
+
+
+
 clus_umap %>% umap_plot(color_by = "cluster", 
                         color_groups =clust_leiden[[7]]$cluster)
 
