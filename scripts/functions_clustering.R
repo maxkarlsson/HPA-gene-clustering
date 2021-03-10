@@ -125,19 +125,15 @@ clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F) {
     # Add progress bar?
   
   res <- data.frame(gene = genes, value = res)
-  
-  if(!is.null(id)) {
-    return(list(cluster = res,
-                time = total_time,
-                id = paste(id,m)))
-  }
+
   if(mult_k == T) {
     return(list(cluster = res,
                 time = total_time,
-                id = paste(id,m,k)))
+                id = paste(id,m,as.character(k))))
   }
   else {
     return(list(cluster = res,
-                time = total_time))
+                time = total_time,
+                id = paste(id,m)))
     }
 }
