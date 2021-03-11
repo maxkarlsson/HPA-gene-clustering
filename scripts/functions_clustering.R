@@ -27,7 +27,7 @@ dist_calc <- function(df,comp,m,id=NULL) {
 
 # Clusteirng function
 
-clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F) {
+clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F, r = 10, mult_r = F) {
   start_time <- Sys.time()
   
   if (m %in% c("kmeans", "pam", "clara", "fanny", "hclust", "agnes", "diana")) {
@@ -85,9 +85,11 @@ clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F) {
     
     louv@graphs$Exp_snn <- neighbors$snn
     
-    louv <- FindClusters(louv, graph.name = "Exp_snn", resolution = 10, algorithm = alg)
+    louv <- FindClusters(louv, graph.name = "Exp_snn", resolution = r, algorithm = alg)
     
-    res <- as.numeric(as.character(louv@meta.data$Exp_snn_res.10))
+    col <- paste("Exp_snn_res.",r,sep="")
+    res <- as.numeric(as.character(louv@meta.data[,col]))
+    #res <- as.numeric(as.character(louv@meta.data$Exp_snn_res.10))
     
   }
   
@@ -100,7 +102,7 @@ clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F) {
   }
   
   if (m == "SOM") {
-    res_som <- som(dist %>% as.matrix())
+    res_som <- som(dist %>% as.matrix(), grid = somgrid(10, k/10, "hexagonal"))
     res <- res_som$unit.classif
   }
   
@@ -131,9 +133,15 @@ clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F) {
                 time = total_time,
                 id = paste(id,m,as.character(k))))
   }
+  else if(mult_r == T) {
+    return(list(cluster = res,
+                time = total_time,
+                id = paste(id,m,as.character(r))))
+  }
   else {
     return(list(cluster = res,
                 time = total_time,
                 id = paste(id,m)))
     }
 }
+
