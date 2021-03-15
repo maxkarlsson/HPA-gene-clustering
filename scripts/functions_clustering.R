@@ -65,7 +65,7 @@ clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F, r = 10, mult_r 
     
       louv <-
         CreateSeuratObject(assay = "Exp",
-                           counts = t(data.frame(row.names = genes, count = c(1:22007))))
+                           counts = t(data.frame(row.names = genes, count = c(1:length(genes)))))
     neighbors <-
       FindNeighbors(
         dist,
