@@ -12,6 +12,7 @@ random_cluster <- function (k,l, names) {
               id = "random"))
 }
 
+
 # Transform results to dataframe
 clusters_to_df <- function (res_list, gene_names) {
   df <- data.frame()
@@ -31,24 +32,26 @@ clusters_to_df <- function (res_list, gene_names) {
   return(list(cluster_results = df, cluster_time = times))
 }
 
+
+
 # Evaluation 
 
-eval <- function(clustering, genes, dist) { # add distance # , t, id = NULL #times
-  
-  #id <- unique(clustering$id)
+eval <- function(clustering, genes, dis) {
   id <- clustering$id
   
-  if (grepl("zscore euclidean",id)){d <- dist[[1]]$distance}
-  if (grepl("min-max euclidean",id)){d <- dist[[2]]$distance}
-  if (grepl("max euclidean",id)){d <- dist[[3]]$distance}
-  if (grepl("zscore manhattan",id)){d <- dist[[4]]$distance}
-  if (grepl("min-max manhattan",id)){d <- dist[[5]]$distance}
-  if (grepl("max manhattan",id)){d <- dist[[6]]$distance}
-  if (grepl("zscore pearson",id)){d <- dist[[7]]$distance}
-  if (grepl("min-max pearson",id)){d <- dist[[8]]$distance}
-  if (grepl("max pearson",id)){d <- dist[[9]]$distance}
-  if (grepl("random",id)){d <- dist[[1]]$distance}
-  
+  if ((id != "random")&(id != "2D")) {
+    for (i in (1:length(dis))) {
+      if(grepl(dis[[i]]$id,id)) {
+        d <- dis[[i]]$distance
+      }
+    } 
+  }
+  else if (id == "2D"){
+    d <- dis$distance
+  } 
+  else {
+    d <- dis[[1]]$distance
+  }
   
   r <- 
     clustering$cluster %>%
@@ -65,20 +68,55 @@ eval <- function(clustering, genes, dist) { # add distance # , t, id = NULL #tim
   dunn_index <- 
     dunn(distance = d, cluster = as.numeric(as.character(clustering$cluster$value)))
   
+  c <- silhouette(dist = d, 
+                  x = as.numeric(as.character(clustering$cluster$value)))
+  
+  c_stats <- summary(c)
+  
+  asw_index <- c_stats$avg.width
+    
+    
   bio_index <- 
     if(require("Biobase") && require("annotate") && require("GO.db") &&
        require("org.Hs.eg.db")) {
-      BHI(clusters, annotation="org.Hs.eg.db", names=r$entrez, category="all") 
+      BHI(clusters, annotation="org.Hs.eg.db", names=r$entrez, category="BP") 
     }
   
-  # t <- times %>%
-  #  filter(id == id) %>%
-  # pull(time)
+  
+  cluster_list <- c()
+  num_clus <- tail(sort(r$value), n=1)
+  num_genes <- length(r$value)
+  for (i in c(0:num_clus)) {
+    genes <- r %>%
+      filter(value==i) %>%
+      pull(entrez) %>%
+      as.character()
+    cluster_list[[as.character(i)]] <- genes
+  }
+  
+  # Profile clusters (with universe)
+  ck <- compareCluster(geneClusters = cluster_list, 
+                             fun = "enrichGO", 
+                             OrgDb = org.Hs.eg.db, 
+                             ont = "BP", 
+                             universe = as.character(r$entrez),
+                             pAdjustMethod = "BH",
+                             pvalueCutoff = 0.05, 
+                             qvalueCutoff = 0.05)
+  
+  ck_tibble <- as_tibble(ck) 
+  
+  bio2_index <-
+    length(unique(as.numeric(ck_tibble$Cluster)))/num_clus
+  
   
   return(data.frame(clustering_id = id,
                     connectivity_index = con_index,
                     dunn_index = dunn_index,
+                    avg_silhouette_width = asw_index,
                     BHI_index = bio_index,
-                    time = clustering$time
+                    BP_enriched = bio2_index,
+                    time = as.numeric(clustering$time, units = "secs")
   ))
-}
+  }
+
