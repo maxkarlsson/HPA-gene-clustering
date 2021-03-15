@@ -47,6 +47,10 @@ data_scaling <- function(df,col_value,col_gene,col_sample,
     df <-
       df %>%
       mutate(tmm = log(.data[[col_value]] + 1))
+  } else {
+    df <-
+      df %>%
+      mutate(tmm = .data[[col_value]])
   }
   
   if (m == "zscore") {
