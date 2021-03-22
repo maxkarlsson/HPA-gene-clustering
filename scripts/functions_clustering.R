@@ -6,7 +6,6 @@ dist_calc <- function(df,comp,m,id=NULL) {
   dist_matrix <-
     df  %>% as_tibble(rownames = "enssscg_id") %>%
     column_to_rownames("enssscg_id") %>%
-    # head(10000) %>%
     select(1:comp) %>%
     get_dist(method = m)
   
@@ -15,8 +14,8 @@ dist_calc <- function(df,comp,m,id=NULL) {
   
   if(!is.null(id)) {
     return (list(id = paste(id, m),
-       distance = dist_matrix,
-       time = total_time))
+                 distance = dist_matrix,
+                 time = total_time))
   }
   
   else {
@@ -25,9 +24,9 @@ dist_calc <- function(df,comp,m,id=NULL) {
   }
 }
 
-# Clusteirng function
+# Clustering function
 
-clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F, r = 10, mult_r = F) {
+clust <- function(dist, k = 10, m, genes, id = NULL, r = 10) { #mult_k = F, mult_r = F
   start_time <- Sys.time()
   
   if (m %in% c("kmeans", "pam", "clara", "fanny", "hclust", "agnes", "diana")) {
@@ -56,16 +55,16 @@ clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F, r = 10, mult_r 
     if (m == "leiden") {
       alg = 4
     }
-        
+    
     dist <- dist %>%
       as.matrix() %>%
       set_colnames(genes) %>%
       set_rownames(genes)%>%
       as.dist()
     
-      louv <-
-        CreateSeuratObject(assay = "Exp",
-                           counts = t(data.frame(row.names = genes, count = c(1:length(genes)))))
+    louv <-
+      CreateSeuratObject(assay = "Exp",
+                         counts = t(data.frame(row.names = genes, c(1:length(genes)))))
     neighbors <-
       FindNeighbors(
         dist,
@@ -89,8 +88,7 @@ clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F, r = 10, mult_r 
     
     col <- paste("Exp_snn_res.",r,sep="")
     res <- as.numeric(as.character(louv@meta.data[,col]))
-    #res <- as.numeric(as.character(louv@meta.data$Exp_snn_res.10))
-    
+    k <- tail(sort(as.numeric(as.character(louv@meta.data[,col]))), n=1)
   }
   
   if (m == "dbscan") {
@@ -116,32 +114,19 @@ clust <- function(dist, k = 10, m, genes, id = NULL, mult_k = F, r = 10, mult_r 
     res <- flashClust(dist, method = "ward", members = NULL)
     res <- res %>% cutree(k) %>% dplyr::as_tibble(rownames = "gene") %>%
       column_to_rownames("gene")
-    res$value = as.factor(res$value)
+    #res$value = as.factor(res$value)
   }
   
   end_time <- Sys.time()
-  
   total_time <- end_time - start_time
   print(total_time)
-
-    # Add progress bar?
   
   res <- data.frame(gene = genes, value = res)
-
-  if(mult_k == T) {
-    return(list(cluster = res,
-                time = total_time,
-                id = paste(id,m,as.character(k))))
-  }
-  else if(mult_r == T) {
-    return(list(cluster = res,
-                time = total_time,
-                id = paste(id,m,as.character(r))))
-  }
-  else {
-    return(list(cluster = res,
-                time = total_time,
-                id = paste(id,m)))
-    }
+  
+  
+  return(list(cluster = res,
+              time = total_time,
+              id = paste(id,m,as.character(k))))
+  # }
 }
 
