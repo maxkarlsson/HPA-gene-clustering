@@ -95,14 +95,14 @@ eval <- function(clustering, genes, dis) {
   }
   
   # Profile clusters (with universe)
-  ck <- compareCluster(geneClusters = cluster_list, 
+  ck <- try(compareCluster(geneClusters = cluster_list, 
                              fun = "enrichGO", 
                              OrgDb = org.Hs.eg.db, 
                              ont = "BP", 
                              universe = as.character(r$entrez),
                              pAdjustMethod = "BH",
                              pvalueCutoff = 0.05, 
-                             qvalueCutoff = 0.05)
+                             qvalueCutoff = 0.05))
   
   ck_tibble <- as_tibble(ck) 
   
@@ -196,22 +196,47 @@ enrich <- function (clustering,ontology_type="BP",orthologs) {
   }
   
   # Profile clusters (with universe)
-  ck <- compareCluster(geneClusters = cluster_list, 
+  ck <- try(compareCluster(geneClusters = cluster_list, 
                        fun = "enrichGO", 
                        OrgDb = org.Hs.eg.db, 
                        ont = ontology_type, 
                        universe = as.character(clustering$entrez),
                        pAdjustMethod = "BH",
-                       pvalueCutoff = 0.05, 
-                       qvalueCutoff = 0.05)
+                       pvalueCutoff = 1, 
+                       qvalueCutoff = 1))
   
   ck_tibble <- as_tibble(ck) 
   
   bio_index <-
-    length(unique(as.numeric(ck_tibble$Cluster)))/num_clus
+    length(unique(as.numeric(ck_tibble$Cluster)))/(num_clus+1)
   
   return(list(enriched_terms = ck_tibble,
          enrichment_score = bio_index))
+  
+}
+
+enrich_cluster <- function (clustering,num,ontology_type="BP",orthologs) {
+  clustering2 <-
+    clustering %>%
+    filter(value == num) %>%
+    left_join(orthologs, by = c("gene" = "enssscg_id")) %>%
+    na.omit() %>%
+    dplyr::select(entrez,value)
+  
+  gene_list <- clustering2$entrez
+  # Profile clusters (with universe)
+  ck <- try(enrichGO(gene = gene_list, 
+                           OrgDb = org.Hs.eg.db, 
+                           ont = ontology_type, 
+                           universe = as.character(clustering$entrez),
+                           pAdjustMethod = "BH",
+                           pvalueCutoff = 1, 
+                           qvalueCutoff = 1))
+  
+  ck_tibble <- as_tibble(ck) 
+
+  
+  return(ck_tibble)
   
 }
 
@@ -231,17 +256,21 @@ find_bestk <- function (results) {
   # Select best k 
   bestk <- 
     results %>%
-    mutate(total_rank = rank_connectivity + rank_dunn + rank_asw + rank_BPE + rank_BHI) %>%
-    group_by(scale_dist) %>%
-    mutate(min = (min(total_rank))) %>%
-    filter(total_rank == min)
+    mutate(total_rank = rank_connectivity + rank_asw +  rank_BHI + rank_BPE +rank_dunn + rank_time) %>% #rank_BPE +rank_dunn + + rank_time
+    dplyr::arrange(total_rank) %>%
+    head(10)
+  
+    #group_by(scale_dist) %>%
+    #mutate(min = (min(total_rank))) %>%
+    #filter(total_rank == min)
+  bestk$clustering_id <- factor(bestk$clustering_id,levels = bestk$clustering_id)
   
   plot_bestk <-
     bestk %>%
     as_tibble() %>%
     gather(key = measure, value = value, connectivity_index:time) %>%
     select(-scale_dist) %>%
-    ggplot(aes(x=clustering_id, y=value, fill=clustering_id)) +
+    ggplot(aes(x=as.factor(clustering_id), y=value, fill=clustering_id)) +
     geom_bar(stat = "identity")+
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
     facet_wrap(~measure, scales="free_y") +
