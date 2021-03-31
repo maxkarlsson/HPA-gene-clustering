@@ -229,12 +229,6 @@ load("data/processed/distances_4.Rdata")
 load("data/processed/leiden_multk.Rdata")
 
 
-# Single evaluation
-# test_eval <- eval(clustering = medoids_multk[[1]][[1]], 
-#                   dis =  distances, 
-#                   genes = ortholog_info)
-
-
 eval_hclust_multk <- lapply(list(1,2,3,4,5,6), function(i) 
   map(hclust_multk[[i]], 
       ~eval(clustering = .x, 
@@ -261,24 +255,9 @@ bestk_leiden <- find_bestk(all_leiden)
 
 save(eval_leiden_df,all_leiden,bestk_leiden, file = "data/processed/evaluation_leiden.Rdata")
 
-
-#Plot all clustering
-  # Create palette according to number of clusters
-
-# Create the 4 alternative UMAPs
-
-
-# Plots
-clust_plot <- 
-  function(clustering,umap)
-
-
-load("data/processed/evaluation_medoids.Rdata") 
-eval_som_df
-bestk_som
 ```
 
-```{r}
+```{r Plot ranking}
 to_eval <- bind_rows(bestk_hclust$bestk, bestk_kmeans$bestk,
                      bestk_medoids$bestk, bestk_louvain$bestk,
                      bestk_leiden$bestk, bestk_som$bestk)
@@ -717,6 +696,90 @@ res_ari %>%
 
 ```
 
+```{r RankAggreg}
+
+load("data/processed/evaluation_louvain.Rdata")
+
+rank <- base::rank
+
+connectivity <- 
+  bestk_louvain$bestk %>%
+  ungroup() %>%
+  select(clustering_id, connectivity_index) %>%
+  arrange(connectivity_index) %>%
+  pull(clustering_id)
+
+avg_silhouette_width <- 
+  bestk_louvain$bestk %>%
+  ungroup() %>%
+  select(clustering_id, avg_silhouette_width) %>%
+  arrange(desc(avg_silhouette_width)) %>%
+  pull(clustering_id)
+
+BHI_index <- 
+  bestk_louvain$bestk %>%
+  ungroup() %>%
+  select(clustering_id, BHI_index) %>%
+  arrange(desc(BHI_index)) %>%
+  pull(clustering_id)
+
+connectivity_weight <- 
+  bestk_louvain$bestk %>%
+  ungroup() %>%
+  select(clustering_id, connectivity_index) %>%
+  arrange(connectivity_index) %>%
+  pull(connectivity_index)
+
+avg_silhouette_width_weight <- 
+  bestk_louvain$bestk %>%
+  ungroup() %>%
+  select(clustering_id, avg_silhouette_width) %>%
+  arrange(desc(avg_silhouette_width)) %>%
+  pull(avg_silhouette_width)
+
+BHI_index_weight <- 
+  bestk_louvain$bestk %>%
+  ungroup() %>%
+  select(clustering_id, BHI_index) %>%
+  arrange(desc(BHI_index)) %>%
+  pull(BHI_index)
+
+
+ranks <- data.frame(connctivity = connectivity, 
+           avg_silhouette_width = avg_silhouette_width, 
+           BHI_index = BHI_index) %>%
+  t()
+
+weights <- data.frame(connctivity = connectivity_weight, 
+           avg_silhouette_width = avg_silhouette_width_weight, 
+           BHI_index = BHI_index_weight) %>%
+  t()
+        
+
+library(RankAggreg)
+
+rank <- RankAggreg(ranks, 6, weights = weights, seed=123)
+rank_noweight <- RankAggreg(ranks, 6,  seed=123)
+
+
+
+
+rank_manual <-
+  bestk_louvain$bestk %>%
+  ungroup()  %>%
+  mutate(rank_connectivity = rank(connectivity_index),
+           rank_asw = rank(-(avg_silhouette_width)),
+           rank_BHI = rank(-(BHI_index)),
+    ) %>%
+  select(clustering_id, rank_connectivity, rank_asw, rank_BHI) %>%
+  mutate(total_rank = rank_connectivity + rank_asw +  rank_BHI ) %>% 
+  dplyr::arrange(total_rank) %>% 
+  pull(clustering_id)
+
+
+```
+
+
 #6- Visualization
 
 ```{r UMAP visualization - tests with Max}
@@ -1149,6 +1212,205 @@ dev.off()
 
 #7- Annotation
 
+```{r Run enrichments}
+load("data/processed/som_multk.Rdata")
+
+
+to_df <- function(multk, add_random = T) {
+  lapply(c(1:4),
+         function(i) 
+           
+           if(add_random == T) {
+             random <- as.data.frame(multk[[1]][[i]]$cluster) %>%
+               mutate(value = sample(value))
+             df <- random %>%
+               mutate(id = 
+                        paste((gsub('[[:digit:]]+', '', 
+                                    multk[[1]][[i]]$id)),"random", 
+                              sep = ""))
+             
+             for (j in c(1:6)) {
+               df <- bind_rows(df, as.data.frame(multk[[j]][[i]]$cluster) %>% 
+                                 mutate(id = multk[[j]][[i]]$id))
+             }
+             return(df)
+           }
+         
+         else {
+           df <- data.frame()
+           for (j in c(1:6)) {
+             df <- bind_rows(df, as.data.frame(multk[[j]][[i]]$cluster) %>% 
+                               mutate(id = multk[[j]][[i]]$id))
+           }
+           return(df)
+         }
+         
+  )
+}
+
+enrich <- function (clustering,ontology_type="BP",orthologs, BP_index=F) {
+  clustering <-
+    clustering %>%
+    left_join(orthologs, by = c("gene" = "enssscg_id")) %>%
+    na.omit() %>%
+    dplyr::select(entrez,value)
+  
+  cluster_list <- c()
+  num_clus <- tail(sort(clustering$value), n=1)
+  num_genes <- length(clustering$value)
+  for (i in c(0:num_clus)) {
+    genes <- clustering %>%
+      filter(value==i) %>%
+      pull(entrez) %>%
+      as.character()
+    cluster_list[[as.character(i)]] <- genes
+  }
+  
+  # Profile clusters (with universe)
+  ck <- try(compareCluster(geneClusters = cluster_list, 
+                           fun = "enrichGO", 
+                           OrgDb = org.Hs.eg.db, 
+                           ont = ontology_type, 
+                           universe = as.character(clustering$entrez),
+                           pAdjustMethod = "BH",
+                           pvalueCutoff = 1, 
+                           qvalueCutoff = 1))
+  
+  ck_tibble <- as_tibble(ck) 
+  
+  if(BP_index == T) {
+    bio_index <-
+      length(unique(as.numeric(ck_tibble$Cluster)))/(num_clus)
+    
+    return(list(enriched_terms = ck_tibble,
+                enrichment_score = bio_index))
+  }
+  
+  else {
+    return(ck_tibble)
+  }
+  
+}
+enrichments_df <- function(df, grouping, orthologs) {
+  
+  res <- df %>%
+    group_by(.data[[grouping]]) %>%
+    do({
+      subset <- .
+      
+      enrichment <-
+        enrich(clustering = subset, orthologs = orthologs) %>%
+        mutate(id = unique(subset$id))
+    })
+  
+}
+
+
+
+df_som <- 
+  to_df(som_multk, add_random = T)
+
+Sys.time() #5.37
+enrichments_som <- df_som %>%
+  map(~enrichments_df(df = .x, grouping = "id", orthologs = ortholog_info))
+
+save(enrichments_som, file="data/processed/enrichments_som.Rdata")
+
+load("data/processed/enrichments_louvain.Rdata")
+
+
+enrichment_scores <- function(df,grouping) {
+  
+  df %>%
+    group_by(.data[[grouping]]) %>%
+    do ({
+      data <- .
+      min_significance <- data %>%
+        mutate(log_qvalue = -log10(qvalue)) %>%
+                                group_by(Cluster) %>% 
+                                summarize(max(log_qvalue)) %>% 
+                                pull(`max(log_qvalue)`) %>% mean() 
+      annotability <- length(data %>%
+               filter(qvalue < 0.05) %>% pull(Cluster) %>% sort() %>% unique())/
+                           length(data %>% pull(Cluster) %>% sort() %>% unique())
+      data.frame(id = unique(data$id), min_significance = min_significance, annotability = annotability)
+        
+    })
+}
+
+# to_plot_kmeans <- 
+#   enrichment_scores(df = enrichments_kmeans[[1]], grouping = "id") %>%
+#   gather(key = "measure", value = "value", -id) 
+# 
+# 
+# to_plot_kmeans$id <- factor(to_plot_kmeans$id,
+#                                             levels = c("zscore euclidean fastkmeans 50","zscore euclidean fastkmeans 70",
+#                                                        "zscore euclidean fastkmeans 90","zscore euclidean fastkmeans 110",
+#                                                        "zscore euclidean fastkmeans 130","zscore euclidean fastkmeans 150",
+#                                                        "zscore euclidean fastkmeans random")
+#                             )
+# 
+# to_plot_kmeans %>%
+#   ggplot(aes(x= id, y = value, fill = id)) +
+#   geom_bar(stat = "Identity") +
+#   theme_minimal() +
+#   facet_wrap(~measure, scales="free_y") +
+#   scale_fill_viridis(discrete = T) +
+#   theme(text = element_text(size=15)) + 
+#   labs(y = "Value", x = "Clustering") +
+#       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+  
+  
+  
+  plot_res <- function(x,grouping) {
+  x %>%
+    group_by(.data[[grouping]]) %>%
+    do ({
+      data <- .
+      curr_id <- strsplit(data$id, " ")
+      title <- paste(curr_id[[1]][1],curr_id[[1]][2],curr_id[[1]][3])
+
+      data$new_id <- curr_id[[1]][4]
+            data$group <- title
+
+      data
+    })
+
+}
+
+# All 
+to_plot_louvain <-
+  map(enrichments_louvain,
+  ~enrichment_scores(.x, grouping = "id"))
+  
+list_to_plot <- 
+  map(to_plot_louvain,
+  ~.x %>% 
+  plot_res(grouping = "id")) 
+  
+
+df_to_plot <- data.frame()
+for(i in c(1:4)){
+  df_to_plot <- bind_rows(df_to_plot, list_to_plot[[i]])
+}
+  
+df_to_plot$new_id <-  factor(df_to_plot$new_id,levels = c("50","70","90","110","130","150","random"))
+df_to_plot$new_id <-  factor(df_to_plot$new_id,levels = c("69","87","104","118","127","138","random"))
+
+df_to_plot%>%
+  ggplot(aes(x= new_id, y = value, fill = new_id)) +
+  geom_bar(stat = "Identity") +
+  theme_minimal() +
+  facet_wrap(group~measure, scales="free_y", ncol = 2) +
+  scale_fill_viridis(discrete = T) +
+  theme(text = element_text(size=10)) + 
+  labs(y = "Value", x = "Clustering") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+}
+```
+
+
 ```{r Enrichment: test BP function}
 # Select clustering result to annotate
 #clustering <- XXX$cluster
@@ -1396,7 +1658,12 @@ b <-
 mean(b$cor)
 ```
 
-```{r}
+
+
+
+###########
+
+```{r test BHI}
 
 
 load("data/processed/hclust_multk.Rdata")
@@ -1430,8 +1697,78 @@ library("writexl")
 write_xlsx(results$enriched_terms,"enrichment.xlsx")
 ```
 
-```{r}
+```{r Evaluations based on enrichments}
+
 load("data/processed/louvain_multk.Rdata")
+
+df_kmeans <- 
+  to_df(kmeans_multk, add_random = T)
+
+Sys.time()
+enrichments_kmeans <- df_kmeans %>%
+  map(~enrichments_df(df = .x, grouping = "id", orthologs = ortholog_info))
+
+
+#load("data/processed/enrichments_kmeans.Rdata")
+
+enrichment_scores <- function(df,grouping) {
+  
+  df %>%
+    group_by(.data[[grouping]]) %>%
+    do ({
+      data <- .
+      min_significance <- data %>%
+        mutate(log_qvalue = -log10(qvalue)) %>%
+                                group_by(Cluster) %>% 
+                                summarize(max(log_qvalue)) %>% 
+                                pull(`max(log_qvalue)`) %>% mean() 
+      annotability <- length(data %>%
+               filter(qvalue < 0.05) %>% pull(Cluster) %>% sort() %>% unique())/
+                           length(data %>% pull(Cluster) %>% sort() %>% unique())
+      data.frame(id = unique(data$id), min_significance = min_significance, annotability = annotability)
+        
+    })
+}
+
+to_plot_kmeans <- 
+  enrichment_scores(df = enrichments_kmeans[[1]], grouping = "id") %>%
+  gather(key = "measure", value = "value", -id) 
+
+
+to_plot_kmeans$id <- factor(to_plot_kmeans$id,
+                                            levels = c("zscore euclidean fastkmeans 50","zscore euclidean fastkmeans 70",
+                                                       "zscore euclidean fastkmeans 90","zscore euclidean fastkmeans 110",
+                                                       "zscore euclidean fastkmeans 130","zscore euclidean fastkmeans 150",
+                                                       "zscore euclidean fastkmeans random"))
+
+to_plot_kmeans %>%
+  ggplot(aes(x= id, y = value, fill = id)) +
+  geom_bar(stat = "Identity") +
+  theme_minimal() +
+  facet_wrap(~measure, scales="free_y") +
+  scale_fill_viridis(discrete = T) +
+  theme(text = element_text(size=15)) + 
+  labs(y = "Value", x = "Clustering") +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+  
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 clustering <- louvain_multk[[1]][[1]]$cluster
 
@@ -1445,60 +1782,77 @@ louvain_k <- list(louvain_multk[[1]][[1]], louvain_multk[[2]][[1]], louvain_mult
 enrichments <- map(louvain_k, 
                    ~enrich(clustering = .x$cluster, orthologs = ortholog_info))
 
-
-enrichment_140 <- enrich(clustering = clustering, orthologs = ortholog_info)
 enrichment_random <- enrich(clustering = clustering_random, orthologs = ortholog_info)
+# 
+# enrichment_random$enriched_terms %>%
+#   ggplot(aes(x=p.adjust)) +
+#   geom_histogram()
+#   geom_bar(stat = "identity")
 
-enrich_cluster(clustering=clustering, num = 0, orthologs = ortholog_info )
+enrichments_louvain <-
+  map(enrichments,
+      ~.x$enriched_terms)
 
-enrichment_random$enriched_terms %>%
-  ggplot(aes(x=p.adjust)) +
-  geom_histogram()
-  geom_bar(stat = "identity")
-
-mean(enrichment_131$enriched_terms$qvalue)
-
-enrichment_140$enriched_terms %>%
-  filter(qvalue < 0.05) %>%
-  pull(qvalue) %>%
-  length()
-
-enrichments <-
-  list(enrichment_random$enriched_terms,
-     enrichment_66$enriched_terms,
-     enrichment_88$enriched_terms,
-     enrichment_104$enriched_terms,
-     enrichment_119$enriched_terms,
-     enrichment_131$enriched_terms,
-     enrichment_140$enriched_terms)
+enrichments_louvain[[7]] <- enrichment_random$enriched_terms
 
 
 
-significance_overall <- map(enrichments, ~.x  %>% pull(qvalue) %>% mean())
-significance_filtered <- map(enrichments, ~.x %>% filter(qvalue < 0.05) %>% pull(qvalue) %>% mean())
-significance_overall_perclust <- map(enrichments, ~.x  %>% group_by(Cluster) 
+# ennrichments <- function(clusterings,orthologs) {
+#   
+#   clustering_random <-
+#     clusterings[[1]][[1]]$cluster %>%
+#     mutate(value = sample(value))
+#   
+#   clusterings_k <- list(clusterings[[1]][[1]], clusterings[[2]][[1]], clusterings[[3]][[1]],
+#                     clusterings[[4]][[1]], clusterings[[5]][[1]], clusterings[[6]][[1]])
+#   
+#   enrichments <- map(clusterings_k, 
+#                      ~enrich(clustering = .x$cluster, orthologs = ortholog_info))
+#   
+#   enrichment_random <- enrich(clustering = clustering_random, orthologs = ortholog_info)
+# 
+#   enrichment_terms <-
+#     map(enrichments,
+#         ~.x$enriched_terms)
+#   
+#   enrichment_terms[[7]] <- enrichment_random$enriched_terms
+#   
+#   return(enrichment_terms)
+# 
+# }
+
+
+
+# Calculate scores
+significance_overall <- map(enrichments_louvain, ~.x  %>% pull(qvalue) %>% mean())
+significance_filtered <- map(enrichments_louvain, ~.x %>% filter(qvalue < 0.05) %>% pull(qvalue) %>% mean())
+significance_overall_perclust <- map(enrichments_louvain, ~.x  %>% group_by(Cluster) 
                                       %>% summarize(mean(qvalue)) %>% pull(`mean(qvalue)`) %>%
                                        mean())
-significance_filtered_perclust <- map(enrichments, ~.x %>% filter(qvalue < 0.05)  %>%
+significance_filtered_perclust <- map(enrichments_louvain, ~.x %>% filter(qvalue < 0.05)  %>%
                                         group_by(Cluster) %>% summarize(mean(qvalue)) %>%
                                         pull(`mean(qvalue)`) %>% mean())
 
-num_sig_terms_total <- map(enrichments, ~.x %>% filter(qvalue < 0.05) %>% pull(qvalue) %>% length)
-num_sig_terms_per_enriched_cluster <- map(enrichments, ~.x %>% 
+num_sig_terms_total <- map(enrichments_louvain, ~.x %>% filter(qvalue < 0.05) %>% pull(qvalue) %>% length)
+num_sig_terms_per_enriched_cluster <- map(enrichments_louvain, ~.x %>% 
                                             filter(qvalue < 0.05) %>% group_by(Cluster) %>%
                                             summarize(length(qvalue)) %>% pull(`length(qvalue)`) %>%
                                             mean())
 
-avg_minq_cluster <- map(enrichments, ~.x %>% group_by(Cluster) %>% 
+avg_minq_cluster <- map(enrichments_louvain, ~.x %>% group_by(Cluster) %>% 
                   summarize(min(qvalue)) %>% pull(`min(qvalue)`) %>% mean() )
 
-perc_enrichmemt <- map(enrichments, ~
+avg_min_logq_cluster <- map(enrichments_louvain, ~.x %>% 
+                              mutate(log_qvalue = -log10(qvalue)) %>%
+                              group_by(Cluster) %>% 
+                              summarize(max(log_qvalue)) %>% 
+                              pull(`max(log_qvalue)`) %>% mean() )
+
+perc_enrichmemt <- map(enrichments_louvain, ~
                        length(.x %>%filter(qvalue < 0.05)%>% pull(Cluster) %>% sort() %>% unique())/
                          length(.x %>% pull(Cluster) %>% sort() %>% unique()))
 
-
-
-### calculate BHIs
+# Calculate BHI
 calc_BHI <- function(c, genes) {
   r <- 
     c%>%
@@ -1518,43 +1872,45 @@ calc_BHI <- function(c, genes) {
 }
   
 
-all_clusters <- list(clustering_random, louvain_multk[[1]][[1]]$cluster,
+all_clusters <- list(louvain_multk[[1]][[1]]$cluster,
                      louvain_multk[[2]][[1]]$cluster, louvain_multk[[3]][[1]]$cluster, 
                      louvain_multk[[4]][[1]]$cluster, louvain_multk[[5]][[1]]$cluster, 
-                     louvain_multk[[6]][[1]]$cluster)
-
+                     louvain_multk[[6]][[1]]$cluster, clustering_random)
 
 
 BHI <- map(all_clusters, ~calc_BHI(.x, genes=ortholog_info))
 
 
-clusterings <- c("random", "louvain_66", "louvain_88", "louvain_104", "louvain_119", "louvain_131", "louvain_140")
-df <- data.frame(clusterings = clusterings, 
+clusterings <- c("louvain_66", "louvain_88", "louvain_104", "louvain_119", "louvain_131", "louvain_140", "random")
+
+df_enrichment_louvain <- 
+  data.frame(clusterings = clusterings, 
              significance_overall = unlist(significance_overall), 
-                 significance_filtered = unlist(significance_filtered),
-                 significance_overall_perclust = unlist(significance_overall_perclust),
-                 significance_filtered_perclust = unlist(significance_filtered_perclust),
-                 num_sig_terms_total = unlist(num_sig_terms_total), 
-                 num_sig_terms_per_enriched_cluster = unlist(num_sig_terms_per_enriched_cluster), 
-                 avg_minq_cluster = unlist(avg_minq_cluster),
-             perc_enrichmemt = unlist(perc_enrichmemt),
-             BHI = unlist(BHI)
-                 )
+             significance_filtered = unlist(significance_filtered),
+             significance_overall_perclust = unlist(significance_overall_perclust),
+             significance_filtered_perclust = unlist(significance_filtered_perclust),
+             num_sig_terms_total = unlist(num_sig_terms_total), 
+             num_sig_terms_per_enriched_cluster = unlist(num_sig_terms_per_enriched_cluster), 
+             avg_minq_cluster = unlist(avg_minq_cluster),
+             avg_min_logq_cluster = unlist(avg_min_logq_cluster),
+             perc_enrichmemt = unlist(perc_enrichmemt)#,
+             #BHI = unlist(BHI)
+  ) 
+
+df_enrichment_louvain <- 
+  df_enrichment_louvain %>%
+  gather(key = measure, value = value, significance_overall:perc_enrichmemt) 
+
+df_enrichment_louvain$clusterings <- factor(df_enrichment_louvain$clusterings,
+                                            levels = unique(df_enrichment_louvain$clusterings))
+
+df_enrichment_louvain$measure <- factor(df_enrichment_louvain$measure,
+                                        levels = unique(df_enrichment_louvain$measure))
 
 
-df2 <-
-  df %>%
-  gather(key = measure, value = value, significance_overall:BHI) 
 
-df2$clusterings <- factor(df2$clusterings,levels = unique(df2$clusterings))
-df2$measure <- factor(df2$measure,levels = unique(df2$measure))
-
-
-
-df2 %>%
+df_enrichment_louvain %>%
   ggplot(aes(x= as.factor(clusterings), y = value, fill = clusterings)) +
-  #geom_point(show.legend = F) +
-  #geom_line(show.legend = F) +
   geom_bar(stat = "Identity") +
   theme_minimal() +
   facet_wrap(~measure, scales="free_y") +
@@ -1564,21 +1920,44 @@ df2 %>%
       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
 
 
+df_enrichment_louvain %>%
+  spread(key = measure, value = value) %>%
+  ggplot(aes(x=avg_min_logq_cluster, y = perc_enrichmemt, color = num_sig_terms_per_enriched_cluster)) +
+  geom_point() +
+  theme_minimal()
 
-save(df, file ="data/processed/test_biological.Rdata")
-  
-  
+save(enrichments_louvain,
+     df_enrichment_louvain, file ="data/processed/enrichment_louvain.Rdata")
 
+enrichments_zscore_euclidean_louvain <- enrichments_louvain
+
+names(enrichments_zscore_euclidean_louvain) <- c("zscore euclidean louvain 66",
+                               "zscore euclidean louvain 88",
+                               "zscore euclidean louvain 104",
+                               "zscore euclidean louvain 119",
+                               "zscore euclidean louvain 131",
+                               "zscore euclidean louvain 140",
+                               "zscore euclidean louvain random")
+
+save(enrichments_zscore_euclidean_louvain, 
+     file = "data/processed/enrichments_zscore_euclidean_louvain.Rdata")
+
+
+#########
+load("data/processed/test_biological.Rdata")
 topList <- RankAggreg(geneLists, 5, N=700, seed=100, convIn=3)
 
 ```
 
 
 ```{r ClusterJudge - Mutual Information}
-load("data/processed/hclust_multk.Rdata")
-clustering <- hclust_multk[[1]][[1]]$cluster
-c<- 
-  clustering_random %>%
+load("data/processed/kmeans_multk.Rdata")
+
+# Retrieve GO temrs
+clustering <- kmeans_multk[[1]][[1]]$cluster
+
+c <- 
+  clustering %>%
   left_join(ortholog_info, by = c("gene" = "enssscg_id")) %>%
     na.omit() %>%
     dplyr::select(ensg_id,value)
@@ -1587,14 +1966,10 @@ clusters <- c$value
 names(clusters) <- c$ensg_id
 str(clusters)
 
-library(annotate)
-goTerms <- annotate::getGO(x = c$ensg_id, data = "org.Hs.eg.db")
+# library(annotate)
+# goTerms <- annotate::getGO(x = c$ensg_id, data = "org.Hs.eg.db")
 
-
-
-library(biomaRt)
 library(biomartr)
-
 GO_tbl <- biomartr::getGO(organism = "Homo sapiens", 
                           genes    = c$ensg_id,
                           filters  = "ensembl_gene_id")
@@ -1611,8 +1986,12 @@ validate_association(GO_terms)
 
 GO_terms_cons <- consolidate_entity_attribute(
        entity.attribute = GO_terms
-     , min.entities.per.attr =3  ### keep only attributes associated to 3 or more entities
-     , mut.inf=FALSE
+     , min.entities.per.attr =10  ### keep only attributes associated to 3 or more entities
+     , mut.inf=FALSE,
+     U.limit = c(0.8),
+                           
+     # U.limit = 0.00000001,
+     plot.saveRDS.file='this_plot.rds'
      )
 
 dim(GO_terms_cons)
@@ -1638,21 +2017,66 @@ genes <- data.frame(gene = gene_names) %>%
     pull(ensg_id)
 
 # Get GO terms
-GO_tbl <- biomartr::getGO(organism = "Homo sapiens", 
-                          genes    = genes,
-                          filters  = "ensembl_gene_id")
-GO_terms <-
-  GO_tbl %>%
-  select(ensembl_gene_id,goslim_goa_accession) %>%
-  rename(ID = ensembl_gene_id,
-         GOID = goslim_goa_accession)
+# GO_tbl <- biomartr::getGO(organism = "Homo sapiens", 
+#                           genes    = genes,
+#                           filters  = "ensembl_gene_id")
+# 
+# GO_tbl$goslim_goa_accession %>% n_distinct()
+# GO_terms <-
+#   GO_tbl %>%
+#   select(ensembl_gene_id,goslim_goa_accession) %>%
+#   rename(ID = ensembl_gene_id,
+#          GOID = goslim_goa_accession)
+# 
+# GO_terms %>%
+#   group_by(GOID) %>%
+#   count() %>%
+#   ggplot(aes(x=n))+
+#   geom_density() 
+
+
+##GO terms
+
+GOterms <- read_tsv("data/meta/E92_all_GOterms.txt")
+
+GO_terms <- 
+  GOterms %>%
+  filter(`GO domain` == "biological_process") %>%
+  select(ID = `Gene stable ID`, GOID = `GO term accession`) %>%
+  na.omit() %>%
+   filter(ID %in% genes)  %>%
+  distinct()
+  # group_by(GOID) %>%
+  # count()
+
+# gene_names_ensg_id <- 
+#   ortholog_info %>%
+#   filter(enssscg_id %in% gene_names) %>%
+#   pull(ensg_id)
 
 GO_terms_cons <- consolidate_entity_attribute(
-       entity.attribute = GO_terms
+       entity.attribute = as.data.frame(GO_terms)
      , min.entities.per.attr =3  ### keep only attributes associated to 3 or more entities
      , mut.inf=FALSE
      )
 
+GO_terms %>%
+  group_by(GOID) %>%
+   count() %>%
+  ggplot(aes(x= log10(n))) +
+  geom_density()
+
+
+GO_terms %>%
+  group_by(GOID) %>%
+   count() %>%
+  arrange(n) %>% 
+  left_join(GOterms %>% 
+              select(3,2) %>% 
+              distinct(),
+            by = c("GOID" = "GO term accession"))
+
+#n>3
 # Function
 mutinfo_zscore <- function(clustering, orthologs, GO_terms) {
   c <- 
@@ -1664,13 +2088,162 @@ mutinfo_zscore <- function(clustering, orthologs, GO_terms) {
   clusters <- c$value
   names(clusters) <- c$ensg_id
   
-  zscore_df <- clusterJudge_z_score(clusters = clusters, entity.attribute = GO_terms, 
-                                    nmb.randomizations = 100, plot.saveRDS.file=NULL)
-  zscore <- zscore_df[1,][[1]]
-  return(zscore)
+  #clusterJudge(clusters = clusters, entity.attribute = GO_terms)
+
+   zscore_df <- clusterJudge_z_score(clusters = clusters, entity.attribute = GO_terms, 
+                                     nmb.randomizations = 30, plot.saveRDS.file=NULL)
+   zscore <- zscore_df[1,][[1]]
+   return(zscore)
 }
+validate_association(GO_terms_cons)
+
+GO_terms_test <-
+  GO_terms_cons %>%
+  filter(ID %in% genes_clustering)
+
+mutinfo_zscore(clustering = louvain_multk[[1]][[1]]$cluster, 
+               orthologs = ortholog_info,
+               GO_terms = GO_terms_cons)
 
 
+ c <- louvain_multk[[1]][[1]]$cluster %>%
+    left_join(ortholog_info, by = c("gene" = "enssscg_id")) %>%
+    na.omit() %>%
+    dplyr::select(ensg_id,value)
+  
+  clusters <- c$value
+  names(clusters) <- c$ensg_id
+  
+  clusterJudge(clusters = clusters, entity.attribute = GO_terms_cons)
+
+
+data(Yeast.GO.assocs) 
+library('yeastExpData')
+data(ccyclered)
+clusters <- ccyclered$Cluster
+names(clusters) <- ccyclered$SGDID
+str(clusters)
+Yeast.GO.assocs.cons <- consolidate_entity_attribute(
+     entity.attribute = Yeast.GO.assocs
+   , min.entities.per.attr =3
+   , mut.inf=mi.GO.Yeast   ### use precalculated mutual information
+   , U.limit = c(0.01,0.001) ### calculate consolidated association for these uncertainty levels
+   ) 
+
+mi.by.swaps<-clusterJudge(
+    clusters = clusters, 
+    entity.attribute=Yeast.GO.assocs.cons[["0.001"]]) 
+
+load("data/processed/louvain_multk.Rdata")
+
+
+
+clusters_df <- louvain_multk[[1]][[1]]$cluster %>%
+  left_join(ortholog_info, by = c("gene" = "enssscg_id")) %>%
+  na.omit() %>%
+  dplyr::select(ensg_id,value) %>%
+  mutate(value = value +1)
+
+clusters <- as.integer(clusters_df$value)
+names(clusters) <- clusters_df$ensg_id
+str(clusters)
+
+
+
+GO <- consolidate_entity_attribute(
+     entity.attribute = as.data.frame(GO_terms)
+   , min.entities.per.attr =3
+  # , mut.inf=mi.GO.Yeast   ### use precalculated mutual information
+   , U.limit = c(0.01,0.001) ### calculate consolidated association for these uncertainty levels
+   ) 
+
+MI <- clusterJudge(
+    clusters = clusters, 
+    entity.attribute=GO[["0.01"]]) 
+
+Z <- clusterJudge_z_score(
+    clusters = clusters, 
+    entity.attribute=GO[["0.01"]]) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+load("data/processed/louvain_multk.Rdata")
+
+
+
+save(GO, file = "data/processed/GO.Rdata")
+genes_clustering <-
+  louvain_multk[[1]][[1]]$cluster %>%
+  left_join(ortholog_info, by = c("gene" = "enssscg_id")) %>%
+    na.omit() %>%
+    dplyr::select(ensg_id,value) %>% pull(ensg_id)
+
+genes_GO <-
+  GO_terms_cons$ID
+
+intersect(genes_clustering,genes_GO)
+
+#KMEANS
+clustering_random_kmeans<-
+  kmeans_multk[[1]][[1]]$cluster %>%
+  mutate(value = sample(value))
+
+res_mutinfo_louvain <-
+  map(louvain_multk, 
+      ~mutinfo_zscore(clustering = .x[[1]]$cluster, 
+                      orthologs = ortholog_info, 
+                      GO_terms = GO_terms_cons))
+
+mutinfo_kmeans <- data.frame(clusterings = c("kmeans_50",
+                                              "kmeans_70",
+                                              "kmeans_90",
+                                              "kmeans_110",
+                                              "kmeans_130",
+                                              "kmeans_150"),
+                              zscore = unlist(res_mutinfo_kmeans))%>%
+  bind_rows(
+    data.frame(clusterings ="random", 
+               zscore = mutinfo_zscore(clustering = clustering_random_kmeans, 
+                  orthologs = ortholog_info, 
+                  GO_terms = GO_terms_cons)))
+
+mutinfo_kmeans$clusterings <- factor(mutinfo_kmeans$clusterings,
+                                      levels = mutinfo_kmeans$clusterings)
+
+mutinfo_kmeans %>%
+  ggplot(aes(x= as.factor(clusterings), y = zscore, fill = clusterings)) +
+  geom_bar(stat = "Identity") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T) +
+  theme(text = element_text(size=10)) + 
+  labs(y = "Value", x = "Clustering") +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+####look at louvain on UMAP
+umap_louv
+louvain_multk[[1]][[1]]
 
 #LOUVAIN
 clustering_random_louvain <-
@@ -1743,8 +2316,117 @@ mutinfo_hclust %>%
   theme(text = element_text(size=10)) + 
   labs(y = "Value", x = "Clustering") +
       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-```
 
+
+#LEIDEN
+clustering_random_leiden <-
+  leiden_multk[[1]][[1]]$cluster  %>%
+  mutate(value = sample(value))
+
+res_mutinfo_leiden <-
+  map(leiden_multk, 
+      ~mutinfo_zscore(clustering = .x[[1]]$cluster, 
+                      orthologs = ortholog_info, 
+                      GO_terms = GO_terms_cons))
+
+mutinfo_leiden<- data.frame(clusterings = c("hclust_50",
+                                              "hclust_70",
+                                              "hclust_90",
+                                              "hclust_110",
+                                              "hclust_130",
+                                              "hclust_150"),
+                              zscore = unlist(res_mutinfo_leiden))%>%
+  bind_rows(
+    data.frame(clusterings ="random", 
+               zscore = mutinfo_zscore(clustering = clustering_random_leiden, 
+                  orthologs = ortholog_info, 
+                  GO_terms = GO_terms_cons)))
+
+mutinfo_leiden$clusterings <- factor(mutinfo_leiden$clusterings,levels = mutinfo_leiden$clusterings)
+
+mutinfo_leiden %>%
+  ggplot(aes(x= as.factor(clusterings), y = zscore, fill = clusterings)) +
+  geom_bar(stat = "Identity") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T) +
+  theme(text = element_text(size=10)) + 
+  labs(y = "Value", x = "Clustering") +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+
+# MEDOIDS
+clustering_random_medoids <-
+  medoids_multk[[1]][[1]]$cluster  %>%
+  mutate(value = sample(value))
+
+res_mutinfo_medoids <-
+  map(medoids_multk, 
+      ~mutinfo_zscore(clustering = .x[[1]]$cluster, 
+                      orthologs = ortholog_info, 
+                      GO_terms = GO_terms_cons))
+
+mutinfo_medoids <- data.frame(clusterings = c("hclust_50",
+                                              "hclust_70",
+                                              "hclust_90",
+                                              "hclust_110",
+                                              "hclust_130",
+                                              "hclust_150"),
+                              zscore = unlist(res_mutinfo_medoids))%>%
+  bind_rows(
+    data.frame(clusterings ="random", 
+               zscore = mutinfo_zscore(clustering = clustering_random_medoids, 
+                  orthologs = ortholog_info, 
+                  GO_terms = GO_terms_cons)))
+
+mutinfo_medoids$clusterings <- factor(mutinfo_medoids$clusterings,levels = mutinfo_medoids$clusterings)
+
+mutinfo_medoids %>%
+  ggplot(aes(x= as.factor(clusterings), y = zscore, fill = clusterings)) +
+  geom_bar(stat = "Identity") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T) +
+  theme(text = element_text(size=10)) + 
+  labs(y = "Value", x = "Clustering") +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+
+# SOM
+clustering_random_som <-
+  som_multk[[1]][[1]]$cluster  %>%
+  mutate(value = sample(value))
+
+res_mutinfo_som <-
+  map(som_multk, 
+      ~mutinfo_zscore(clustering = .x[[1]]$cluster, 
+                      orthologs = ortholog_info, 
+                      GO_terms = GO_terms_cons))
+
+mutinfo_som <- data.frame(clusterings = c("hclust_50",
+                                              "hclust_70",
+                                              "hclust_90",
+                                              "hclust_110",
+                                              "hclust_130",
+                                              "hclust_150"),
+                              zscore = unlist(res_mutinfo_som))%>%
+  bind_rows(
+    data.frame(clusterings ="random", 
+               zscore = mutinfo_zscore(clustering = clustering_random_hclust, 
+                  orthologs = ortholog_info, 
+                  GO_terms = GO_terms_cons)))
+
+mutinfo_hclust$clusterings <- factor(mutinfo_hclust$clusterings,levels = mutinfo_hclust$clusterings)
+
+mutinfo_hclust %>%
+  ggplot(aes(x= as.factor(clusterings), y = zscore, fill = clusterings)) +
+  geom_bar(stat = "Identity") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T) +
+  theme(text = element_text(size=10)) + 
+  labs(y = "Value", x = "Clustering") +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
 
 ```{r Guy}
 # Prepare data
@@ -1834,4 +2516,79 @@ bp <-
 bp_random <- enrich(clustering = random_clustering, orthologs = ortholog_info)
 
 
-k```
+```
+
+```{r Retrieve partitions for ARI}
+
+to_df <- function(multk, add_random = T) {
+  
+  lapply(c(1:4),
+         function(i) 
+           
+           if(add_random == T) {
+             random <- as.data.frame(multk[[1]][[i]]$cluster) %>%
+               mutate(value = sample(value))
+             df <- random %>%
+               mutate(id = 
+                        paste((gsub('[[:digit:]]+', '', 
+                                    multk[[1]][[i]]$id)),"random", 
+                              sep = ""))
+             
+             for (j in c(1:6)) {
+               df <- bind_rows(df, as.data.frame(multk[[j]][[i]]$cluster) %>% 
+                                 mutate(id = multk[[j]][[i]]$id))
+             }
+             return(df)
+           }
+         
+         else {
+           df <- data.frame()
+           for (j in c(1:6)) {
+             df <- bind_rows(df, as.data.frame(multk[[j]][[i]]$cluster) %>% 
+                               mutate(id = multk[[j]][[i]]$id))
+           }
+           return(df)
+         }
+         
+  )
+}
+
+all_dfs <- map(list(kmeans_multk, medoids_multk, hclust_multk, 
+                      louvain_multk, leidenn_multk, som_multk),
+               ~to_df(.x))
+
+merge_all_df <- function(list_df) {
+  df <- data.frame()
+  for (i in c(1:6)) {
+    for (j in c(1:4)) {
+      df <- bind_rows(df, list_df[[i]][[j]])
+    }
+  }
+  
+  return(df)
+}
+
+all_partitions <- merge_all_df(all_dfs)
+
+
+best_partitions <- c("zscore euclidean fastkmeans random", "max euclidean SOM 90")
+
+filtered <-
+  all_partitions %>%
+  filter(id %in% best_partitions)
+
+
+
+
+```
+
+```{r Linear model}
+#Input df: ID, scaling, distance, clustering, k, score
+
+model <- lm(score ~ scaling + distance + clustering + k) # interaction
+
+anova
+
+```
+
+
