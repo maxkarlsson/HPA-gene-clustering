@@ -166,7 +166,6 @@ eval_to_df <- function (eval_list) {
     theme_minimal() +
     #ggtitle() +
     facet_wrap(scale_dist~measure, scales="free_y") +
-    scale_color_viridis(discrete = T) +
     theme(text = element_text(size=10)) + 
     labs(y = "Value", x = "Number of clusters")
   
@@ -241,47 +240,53 @@ enrich_cluster <- function (clustering,num,ontology_type="BP",orthologs) {
 }
 
 
-find_bestk <- function (results) {
-  #ank
-  results <-
+## Best k
+find_bestk <- function (results,measures,plot = F, n=1) {
+  best_id <-
     results %>%
-    mutate(rank_connectivity = rank(connectivity_index),
-           rank_dunn = rank(-(dunn_index)),
-           rank_asw = rank(-(avg_silhouette_width)),
-           rank_BHI = rank(-(BHI_index)),
-           rank_BPE = rank(-(BP_enriched)),
-           rank_time = rank(time)
-    )
+    filter(measure %in% measures) %>%
+    group_by(measure) %>%
+    do ({
+      data <- .
+      if (unique(data$measure) == "connectivity_index") {
+        data %>%
+          mutate(rank= rank(value,ties.method = "random"))
+      }
+      else {
+        data %>%
+          mutate(rank = rank(-(value),ties.method = "random"))
+      }
+    }) %>%
+    group_by(id) %>%
+    summarise(total_rank = sum(rank)) %>%
+    arrange(total_rank) %>% 
+    head(n) %>%
+    pull(id)
   
-  # Select best k 
-  bestk <- 
-    results %>%
-    mutate(total_rank = rank_connectivity + rank_asw +  rank_BHI + rank_BPE +rank_dunn + rank_time) %>% #rank_BPE +rank_dunn + + rank_time
-    dplyr::arrange(total_rank) %>%
-    head(10)
-  
-    #group_by(scale_dist) %>%
-    #mutate(min = (min(total_rank))) %>%
-    #filter(total_rank == min)
-  bestk$clustering_id <- factor(bestk$clustering_id,levels = bestk$clustering_id)
-  
-  plot_bestk <-
-    bestk %>%
-    as_tibble() %>%
-    gather(key = measure, value = value, connectivity_index:time) %>%
-    select(-scale_dist) %>%
-    ggplot(aes(x=as.factor(clustering_id), y=value, fill=clustering_id)) +
-    geom_bar(stat = "identity")+
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-    facet_wrap(~measure, scales="free_y") +
-    scale_fill_viridis(discrete = T) +
-    theme_minimal()+
-    theme(axis.text.x=element_text(angle =- 50, vjust = 0.5)) + 
-    scale_x_discrete(labels = NULL, breaks = NULL) +
-    labs(y = "Value", x = "Clustering strategy")
-  
-  return(list(bestk= bestk,
-              plot_bestk = plot_bestk))
+  if(plot == T) {
+    results$k <- factor(results$k,levels = sort(unique(results$k)))
+    
+    title <- unique(results$scale_dist_clust)
+    plot_bestk <-
+      results %>%
+      filter(measure %in% measures)  %>%
+      ggplot(aes(x=k, y=value, fill=k)) +
+      geom_bar(stat = "identity")+
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+      facet_wrap(~measure, scales="free_y") +
+      scale_fill_viridis(discrete = T) +
+      theme_minimal()+
+      scale_x_discrete(labels = NULL, breaks = NULL) +
+      labs(y = "Value", x = "Number of clusters") +
+      ggtitle(title)
+    
+    
+    return(list(bestk= best_id,
+                plot_bestk = plot_bestk))
+  }
+  else {
+    return(best_id)
+  }
   
 }
 
@@ -334,6 +339,68 @@ add_clusterings <- function(df, ref_clust, dist, pca, gene_names, dist_m = "eucl
   return(bind_rows(df,ev_extra$res))
   
   }
+
+
+to_df <- function(multk, add_random = T) {
+  
+  lapply(c(1:4),
+         function(i) 
+           
+           if(add_random == T) {
+             random <- as.data.frame(multk[[1]][[i]]$cluster) %>%
+               mutate(value = sample(value))
+             df <- random %>%
+               mutate(id = 
+                        paste((gsub('[[:digit:]]+', '', 
+                                    multk[[1]][[i]]$id)),"random", 
+                              sep = ""))
+             
+             for (j in c(1:6)) {
+               df <- bind_rows(df, as.data.frame(multk[[j]][[i]]$cluster) %>% 
+                                 mutate(id = multk[[j]][[i]]$id))
+             }
+             return(df)
+           }
+         
+         else {
+           df <- data.frame()
+           for (j in c(1:6)) {
+             df <- bind_rows(df, as.data.frame(multk[[j]][[i]]$cluster) %>% 
+                               mutate(id = multk[[j]][[i]]$id))
+           }
+           return(df)
+         }
+         
+  )
+}
+
+merge_all_df <- function(list_df) {
+  df <- data.frame()
+  for (i in c(1:6)) {
+    for (j in c(1:4)) {
+      df <- bind_rows(df, list_df[[i]][[j]])
+    }
+  }
+  
+  return(df)
+}
+
+enrichments_df <- function(df, grouping, orthologs) {
+  
+  res <- df %>%
+    group_by(.data[[grouping]]) %>%
+    do({
+      subset <- .
+      
+      enrichment <-
+        enrich(clustering = subset, orthologs = orthologs) %>%
+        mutate(id = unique(subset$id))
+    })
+  
+}
+
+
+
 
 
 
