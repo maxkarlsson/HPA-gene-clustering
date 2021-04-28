@@ -24,7 +24,7 @@ library(pcaMethods)
 library(factoextra)
 library(cluster)
 library(kohonen)
-# library(ClusterR)
+library(ClusterR)
 # library(fclust)
 library(flashClust)
 library(Seurat)
@@ -46,6 +46,12 @@ library(ClusterJudge)
 library(mixOmics)
 library(ggsci)
 library(scales)
+library(treemapify)
+library(rrvgo)
+library(patchwork)
+library(ggplotify)
+library(ggdendro)
+
 
 map <- purrr::map
 pca <- pcaMethods::pca
@@ -57,6 +63,7 @@ source("scripts/functions_preprocessing.R")
 source("scripts/functions_dimensionalityreduction.R")
 source("scripts/functions_clustering.R")
 source("scripts/functions_evaluation.R")
+source("scripts/functions_annotation.R")
 
 map <- purrr::map
 select <- dplyr::select
@@ -84,6 +91,10 @@ tissue_info <-
   separate_rows("enhanced_tissues", sep = ',') %>%
   select(ensg_id,enhanced_tissues) %>%
   remove_missing()
+
+geninfo <- 
+  read_delim("data/meta/geninfo_92.tsv", delim = "\t")
+
   
 # Color palette
 colors <-
@@ -93,6 +104,32 @@ tissue_colors <- colors  %>%
   select(organ_color, consensus_tissue_name) %>%
   distinct() %$%
   set_names(organ_color, consensus_tissue_name)
+gene_category_pal <-
+  c("tissue enriched" = "#e41a1c",
+    "group enriched" = "#FF9D00",
+    "tissue enhanced" = "#984ea3",
+    "low tissue specificity" = "grey40",
+   
+    "detected in all" = "#253494",
+    "detected in many" = "#2c7fb8",
+    "detected in some" = "#41b6c4",
+    "detected in single" = "#a1dab4",
+   
+    "not detected" = "grey",
+    "not detected " = "grey",
+   
+    "Tissue enriched" = "#e41a1c",
+    "Group enriched" = "#FF9D00",
+    "Tissue enhanced" = "#984ea3",
+    "Low tissue specificity" = "grey40",
+   
+    "Detected in all" = "#253494",
+    "Detected in many" = "#2c7fb8",
+    "Detected in some" = "#41b6c4",
+    "Detected in single" = "#a1dab4",
+   
+    "Not detected" = "grey",
+    "Not detected " = "grey")
 
 # Information of orthologs
 ortholog_info <- 
@@ -106,6 +143,7 @@ ortholog_info <-
 
 ```{r plot theme}
 
+
 ```
 
 
@@ -118,7 +156,7 @@ filtered_data <-
   data %>% 
   filter(!enssscg_id %in% genes_to_filter)
 
-# Save gene names in order
+# Save gene names
 gene_names <- 
   filtered_data %>%
   select(enssscg_id, sample_ID, tpm) %>%
@@ -137,24 +175,11 @@ tmm_data <-
   gather(key = "sample_ID", value = "tmm", - enssscg_id)
 
 
-tmm_data %>%
-  spread(key= sample_ID, value = tmm) %>% 
-  column_to_rownames("enssscg_id") %>% 
-  pheatmap(show_colnames = F, show_rownames = F,
-           cluster_rows = F, cluster_cols = F,
-           color = RColorBrewer::brewer.pal(7, "YlGnBu"))
 # Scale data
 scaled <- list("zscore","max") %>% #"min-max",
   map(~data_scaling(df = tmm_data, col_value = "tmm",
                     col_gene = "enssscg_id", col_sample = "sample_ID",
                     log_transform = F, m = .x))
-
-scaled[[2]]$scaled %>% 
-  column_to_rownames("enssscg_id") %>% 
-  pheatmap(show_colnames = F, show_rownames = F,
-           cluster_rows = F, cluster_cols = F,
-           color = RColorBrewer::brewer.pal(7, "YlGnBu"))
-
 
 ```
 
@@ -167,12 +192,12 @@ scaled[[2]]$scaled %>%
 pcas <- scaled %>%
   map(~pca_calc(data = .x$scaled, npcs = 200, m = .x$method))
 
-pcas[[2]]$scores %>%
-  as_tibble() %>% 
-  dplyr::select(c(1:30)) %>% 
-  pheatmap(show_colnames = F, show_rownames = F,
-           cluster_rows = F, cluster_cols = F,
-           color = RColorBrewer::brewer.pal(7, "YlGnBu"))
+# pcas[[2]]$scores %>%
+#   as_tibble() %>% 
+#   dplyr::select(c(1:30)) %>% 
+#   pheatmap(show_colnames = F, show_rownames = F,
+#            cluster_rows = F, cluster_cols = F,
+#            color = RColorBrewer::brewer.pal(7, "YlGnBu"))
 # save(pcas,
 #      file = "data/processed/pcas.Rdata")
 
@@ -194,10 +219,6 @@ distances <- lapply(list("euclidean","pearson"), function(i) #"manhattan"
 #4- Clustering
 
 ```{r Clustering analysis}
-#load("data/processed/distances_4.Rdata")
-#load("data/processed/gene_names.Rdata")
-
-#d <- list(distances[[1]][[1]],distances[[1]][[2]],distances[[2]][[1]],distances[[2]][[2]])
 
 # Run with 1 k 
 res_kmeans <- 
@@ -831,6 +852,7 @@ save(enrichments_louvain,
 #### Find GO_filtered
 load("data/processed/GO_filtered.Rdata")
 
+
 GOterms <- read_tsv("data/meta/E92_all_GOterms.txt")
 
 gene_ids <- ortholog_info %>% filter(enssscg_id %in% gene_names) %>% pull(ensg_id)
@@ -1145,6 +1167,7 @@ data_radar$id <- factor(data_radar$id, levels = c("max pearson fasthclust 50","z
 
 data_radar <- data_radar %>% arrange(id)
 
+library(colorspace)
 ann_transp <- unlist(map(ann_colors$clust, ~adjust_transparency(.x, alpha = 0.007)))
 
 c <- ann_colors$clust
@@ -1160,7 +1183,6 @@ names(c2) <-c("max pearson fasthclust 50","zscore pearson fastkmeans 70",
 
 library(ggiraphExtra)
 library(ggradar)
-library(colorspace)
 
 
 ggRadar(data_radar,scales = "free", rescale = F, aes(color=id,group=id), alpha = 0.12) +
@@ -1181,9 +1203,15 @@ ggRadar(data_radar,scales = "fixed",rescale=F, aes(facet = id,color=id), alpha =
   ylim(0, 1)
 
 
+dat
+d2 <-
+  data_radar
+d2$id <- as.character(d2$id)
 
 d2 <-
-  data_radar %>% 
+  d2 %>% 
+  group_by(id) %>% 
+  mutate(id = strsplit(id, " ")[[1]][3]) %>% 
   gather(key=measure,value=value,-id) %>% 
   spread(key=id, value=value) %>% 
   filter(measure %in% c("annotability","avg_silhouette_width","connectivity_index","MI_zscore"))
@@ -1258,10 +1286,99 @@ legend(x=0.7, y=1, legend = rownames(data_r[-c(1,2),]), bty = "n", pch=20 , col=
 ```
 
 ```{r Correlation metrics}
+cor_matrix <- 
+  all_ranked %>%
+  select(id,measure,scaled_value) %>% 
+  spread(measure,scaled_value) %>%
+  column_to_rownames("id") %>% 
+  cor()
+
+cor_matrix %>% 
+  pheatmap()
+library(corrplot)
+
+corrplot(cor_matrix,
+  method = "shade",
+  type = "upper",
+  diag = F, # show only upper side,
+  hclust.method ="ward",
+  pch.col = "black"
+)
+
+  hclust.method = c("complete", "ward",col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+corrplot(cor_matrix,
+    method = "color", col = col(200), number.font = number.font,
+    mar = mar, number.cex = number.cex,
+    type = type, order = order,
+    addCoef.col = "black", # add correlation coefficient
+    tl.col = "black", tl.srt = tl.srt, # rotation of text labels
+    # combine with significance level
+   # p.mat = p.mat, sig.level = sig.level, insig = "blank",
+    # hide correlation coefficients on the diagonal
+#    diag = diag
+  )
+
+rquery.cormat(cor_matrix, type="upper")
+
+d <- 
+  all_ranked %>%
+  select(id,measure,scaled_value) %>% 
+  spread(measure,scaled_value)
 
 
+d %>% 
+  ggplot(aes(x=connectivity_index,y=MI_zscore)) +
+  geom_point()
+library("ggpubr")
+
+
+ggscatter(d, x = "avg_silhouette_width", y = c("connectivity_index","MI_zscore","annotability"),
+          combine = T,
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson") 
 ```
 
+```{r UMAP clustering results}
+clusterings_umap <- 
+  all_ranked %>% 
+  select(-value, -avg_value) %>% 
+  spread(key = measure, value = scaled_value) %>% 
+  umap_calc(n_neigh = 15, row_names = "id")
+
+library(ggalt)
+
+clusterings_umap %>% 
+  group_by(features) %>% 
+  mutate(scale_dist = paste(strsplit(features, " ")[[1]][1], strsplit(features, " ")[[1]][2]),
+                            clust = strsplit(features, " ")[[1]][3],
+                            k = as.numeric(strsplit(features, " ")[[1]][4])) %>% 
+           ggplot(aes(x=V1, y=V2, color = clust)) +
+           geom_point( size=2) +
+  theme_minimal() +
+  geom_encircle()
+
+geom_encircle(aes(group = cluster)
+              
+
+library(colorspace)
+ann_transp <- unlist(map(ann_colors$clust, ~adjust_transparency(.x, alpha = 0.02)))
+              
+clusterings_umap %>% 
+  group_by(features) %>% 
+  mutate(scale_dist = paste(strsplit(features, " ")[[1]][1], strsplit(features, " ")[[1]][2]),
+                            clust = strsplit(features, " ")[[1]][3],
+                            k = as.numeric(strsplit(features, " ")[[1]][4])) %>% 
+           ggplot(aes(x=V1, y=V2, color = clust, fill = clust)) +
+           geom_point( size=3) +
+  theme_minimal() +
+  geom_encircle() +
+  scale_color_manual(values = clust) +
+  scale_fill_manual(values = ann_transp)
+
+geom_encircle(aes(group = cluster)
+              
+```
 
 
 
@@ -2053,8 +2170,44 @@ plots <-
          })
 ```
 
+```{r Visualizations final clustering}
+final_clustering <-
+  all_partitions %>% 
+  filter(id=="zscore pearson medoids 50")
+
+umap_zscores %>% umap_plot(color_by="cluster",color_groups = final_clustering )
+
+
+```
+
 ```{r Network}
 
+genes_per_cluster <- clustering %>% 
+  group_by(value) %>% 
+  count()
+
+to_network <- 
+  fisher_res %>% 
+  mutate(cluster = as.numeric(cluster)) %>% 
+  filter(adj_p < 0.01) %>% 
+  select(cluster,enhanced_tissues,odds_ratio) %>% 
+  left_join(genes_per_cluster, by= c("cluster" = "value"))
+
+network <- to_network %>%
+  left_join(tissue_colors %>%  enframe(), by = c("enhanced_tissues" = "name")) %>% 
+  rename(tissue_color = value,
+         n_genes = n,
+         tissue = enhanced_tissues)
+
+annotation <- read_excel(path = "20210426_annotation.xlsx", sheet = "cluster_info")
+
+network_annotated <- network %>% 
+  left_join(annotation %>% select(cluster,Max)) %>% 
+  rename(annotation = Max) %>% 
+  mutate (n_genes = sqrt(n_genes)) %>% 
+  filter(odds_ratio > 2)
+
+write_csv(network_annotated, file = "network_annotated_sqrtgenes.csv")
 ```
 
 
@@ -2083,7 +2236,7 @@ unique()
 # clustering <-
 #   clustering %>%
 #   mutate(value = value+1)
-
+#load("data/processed/all_partitions.Rdata")
 clustering <- 
   all_partitions %>%
   filter(id == "zscore pearson medoids 70") %>%
@@ -2284,360 +2437,8 @@ clus_umap %>%
 ggsave("results/human UMAP tissue contribution.pdf", width = 5, height = 5)
 ```
 
-```{r Fischer test 1}
-
-## HT to tissue
-
-tissue_info
-clus %>%
-  
-# HT to category (enriched / enhanced)
-
-clas
-clus
-
-# ----- Hypergeometric test ------
-
-cluster_ht <- 
-  clus %>%
-  rename(cluster=value) %>%
-  left_join(gene_info, by = c("gene" = "ensg_id")) %>% 
-  mutate(enhanced_tissues = ifelse(is.na(enhanced_tissues), 
-                                   "not enriched", enhanced_tissues)) %>%
-  separate_rows(enhanced_tissues, sep = ",") %>%
-  
-  {
-    # q is the number of successes
-    q <- 
-      group_by(., enhanced_tissues, cluster, .drop = F) %>%
-      summarise(q = n_distinct(gene))
-    # k is the number of tries - i.e. the cluster size
-    k <- 
-      group_by(., cluster, .drop = F) %>%
-      summarise(k = n_distinct(gene))
-    
-    # m is the number of possible successes
-    m <- 
-      group_by(., enhanced_tissues, .drop = F) %>%
-      summarise(m = n_distinct(gene))
-    
-    # n is the population size - i.e. the number of genes
-    n <- n_distinct(.$gene)
-    
-    q %>% 
-      left_join(k) %>% 
-      left_join(m) %>%
-      # n is the population size - i.e. the number of genes
-      mutate(n = n - m) 
-    
-  } 
-
-cluster_ht_res <- 
-  cluster_ht %>%
-  group_by(enhanced_tissues, cluster) %>%
-  # Testing the chance of getting the observed number or higher per cluster and tissue type
-  summarise(p_value = phyper(q - 1, m, n, k, lower.tail = F)) %>%
-  ungroup() %>%
-  mutate(p_value = ifelse(p_value == 0, .Machine$double.xmin, p_value),
-         adj_pval = p.adjust(p_value, method = "BH"),
-         sign_level = case_when(adj_pval < 0.00000001 ~ 8,
-                                adj_pval < 0.0000001 ~ 7,
-                                adj_pval < 0.000001 ~ 6,
-                                adj_pval < 0.00001 ~ 5,
-                                adj_pval < 0.0001 ~ 4,
-                                adj_pval < 0.001 ~ 3,
-                                adj_pval < 0.01 ~ 2,
-                                adj_pval < 0.05 ~ 1,
-                                T ~ 0),
-         log_p = -log10(adj_pval))
-
-# a <- 
-#   pig_gene_cluster_enrich_hyper %>% 
-#   select(1:2, log_p) %>%
-#   spread(enhanced_tissues, log_p) %>% 
-#   column_to_rownames("cluster") %>% 
-#   umap_calc(npcs = 2)
-# 
-# a %>%
-#   as_tibble(rownames = "cluster") %>% 
-#   ggplot(aes(V1, V2, label = cluster)) +
-#   geom_text()
-# 
-
-cluster_ht_res %>% 
-  select(enhanced_tissues, cluster, adj_pval, log_p) %>%
-  group_by(enhanced_tissues, cluster) %>%
-  mutate(log_p = min(log_p, 20)) %>%
-  ungroup() %>% 
-  mutate(log_p = ifelse(adj_pval < 0.05, 1, 0)) %>%
-  select(-adj_pval) %>%
-  spread(cluster, log_p, fill = 0) %>% 
-  column_to_rownames("enhanced_tissues") %>%
-  pheatmap(clustering_method = "ward.D2",
-           #cutree_cols = n_distinct(similar_clusters$similar_cluster),
-          # annotation_col = similar_clusters %>% 
-          #   column_to_rownames("cluster"), 
-           #filename = savepath("UMAP similar clusters heatmap.pdf"),
-           width = 15, 
-           height = 6)
-
-## Dendogram add
-cluster_ht_res %>% 
-  select(enhanced_tissues, cluster, log_p) %>%
-  ggplot(aes(x=cluster,y=enhanced_tissues,size = log_p)) +
-  geom_point() +
-  theme_bw()
-  
-  
-  ###
-  group_by(enhanced_tissues, cluster) %>%
-  mutate(log_p = min(log_p, 20)) %>%
-  ungroup() %>%
-  mutate(log_p = ifelse(log_p < 3, 0, 1)) %>%
-  spread(cluster, log_p) %>%
-  column_to_rownames("enhanced_tissues") %>%
-  pheatmap(clustering_method = "ward.D2")
-
-```
-
-```{r Fischer test 2}
-# Cluster data?
-# pca_red <-
-#   tmm_data %>%
-#   #filter(gene_id %in% expressed_genes) %>%
-#   spread(key = "sample_ID",  value = "tmm") %>%
-#   column_to_rownames("enssscg_id") %>%
-#   t() %>%
-#   scale() %>%
-#   t() %>%
-#   pca_calc(npcs = 10)
-# 
-# n_genes <-
-#   pca_red$scores %>%
-#   nrow()
-# 
-# gene_clusters <-
-#   pca_red$scores %>%
-#   head(n_genes) %>%
-#   dist() %>%
-#   fastcluster::hclust(method = "ward.D2") %>%
-#   cutree(50) %>%
-#   enframe("gene_id", "cluster") %>% 
-#   left_join(meta_data_gene) %>%
-#   left_join(gene_classification)
-
-
-gene_clusters <- 
-  all_partitions %>%
-  filter(id == "max pearson medoids 50") %>%
-  select(gene, value) %>%
-  rename(gene_id = gene, cluster = value) %>%
-  left_join(tissue_info, by = c("gene_id" = "ensg_id")) 
-
-n_genes <- length(unique(gene_clusters$gene_id))
-
-fisher_data <- 
-  gene_clusters %>%
-  mutate(enhanced_tissues = ifelse(is.na(enhanced_tissues),
-                                   "not enriched",
-                                   enhanced_tissues),
-         enhanced_tissues = factor(enhanced_tissues),
-         cluster = factor(cluster)) %>%
-  group_by(cluster, enhanced_tissues, .drop = F) %>%
-  count() %>%
-  group_by(enhanced_tissues) %>%
-  mutate(total_specific = sum(n),
-         total_not_specific = n_genes - total_specific) %>%
-  group_by(cluster) %>%
-  mutate(total_in_cluster = sum(n),
-         total_not_in_cluster = n_genes - total_in_cluster ) %>%
-  ungroup()
- 
-
-
-# Compare to classification (fisher test)
-# 
-# fisher_data <-
-#   gene_clusters %>%
-#   mutate(enhanced_tissues = gsub(", ", "_", enhanced_tissues)) %>%
-#   separate_rows(enhanced_tissues, sep = ",") %>%
-#   mutate(enhanced_tissues = gsub("_", ", ", enhanced_tissues),
-#          enhanced_tissues = ifelse(is.na(enhanced_tissues),
-#                                    "not enriched",
-#                                    enhanced_tissues),
-#          enhanced_tissues = factor(enhanced_tissues),
-#          cluster = factor(cluster)) %>%
-#   group_by(cluster, enhanced_tissues, .drop = F) %>%
-#   count() %>%
-#   group_by(enhanced_tissues) %>%
-#   mutate(total_specific = sum(n),
-#          total_not_specific = n_genes - total_specific) %>%
-#   group_by(cluster) %>%
-#   mutate(total_in_cluster = sum(n),
-#          total_not_in_cluster = n_genes - total_in_cluster ) %>%
-#   ungroup()
- 
-
-fisher_res <-
-  fisher_data %>%
-  group_by(cluster, enhanced_tissues) %>%
-  do({
-    g_data <<- .
-   
-    contingency_matrix <-
-      matrix(c(g_data$n,
-               g_data$total_in_cluster - g_data$n,
-               g_data$total_specific - g_data$n,  
-               g_data$total_not_specific - (g_data$total_specific - g_data$n)),
-             nrow = 2,
-             dimnames =
-               list(c("Specific", "Not specific"),
-                    c("In cluster", "Not in cluster")))
-   
-    contingency_matrix %>%
-      fisher.test(alternative = "greater") %>%
-      broom::tidy()
-  }) %>%
-  ungroup() %>%
-  mutate(p.value = ifelse(p.value == 0, .Machine$double.xmin, p.value),
-                          adj_p = p.adjust(p.value, method = "BH")) %>%
-  rename(odds_ratio = estimate)
-
-
-fisher_data %>%
-  filter(cluster == 8) %>%
-  arrange(-n)
-
-fisher_res %>%
-  select(1, 2, adj_p) %>%
-  filter(adj_p < 0.05) %>%
-  spread(enhanced_tissues, adj_p, fill = 1) %>%
-  column_to_rownames("cluster") %>%
-  {-log10(.)}  %>%
-  pheatmap(color = viridis::magma(100, direction = -1),
-           border_color = NA,
-           clustering_distance_rows = "binary",
-           clustering_distance_cols = "binary",
-           clustering_method = "ward.D2")
-
-fisher_res %>%
-  filter(adj_p < 0.05) %>%
-  select(1, 2, odds_ratio) %>%
-  spread(enhanced_tissues, odds_ratio, fill = 0) %>%
-  column_to_rownames("cluster") %>%
-  pheatmap(color = viridis::magma(100, direction = -1),
-           border_color = NA,
-           clustering_distance_rows = "binary",
-           clustering_distance_cols = "binary",
-           clustering_method = "ward.D2")
-
-
-fisher_res %>%
-  filter(adj_p < 0.05) %>%
-  select(1, 2, odds_ratio) %>%
-  #spread(enhanced_tissues, odds_ratio, fill = 0) %>% 
-  ggplot(aes(x=cluster,y=enhanced_tissues,size = odds_ratio, color = enhanced_tissues)) +
-  geom_point() +
-  theme_bw() +
-  scale_color_manual(values = tissue_colors)
-
-
-
-
-cluster_query <-
-  function(query_data, clustering, distance_method = "euclidean") {
-   
-    stopifnot(clustering %in% c("ward.D", "ward.D2", "single", "complete",
-                                "average", "mcquitty", "median", "centroid"))
-   
-    query_data %>%
-      select(gene_name, tissue, exp) %>%
-      mutate(exp = ifelse(!is.finite(exp), 0, exp)) %>%
-      spread(tissue, exp) %>%
-      column_to_rownames("gene_name") %>%
-     
-      {list(gene = dist(., distance_method) %>%
-              stats::hclust(method = clustering),
-           sample = t(.) %>%
-             dist(distance_method) %>%
-             stats::hclust(method = clustering))}
-    
-  }
-
-
-library(ggdendro)
-
-query_data <-
-  
-  fisher_res %>% 
-  mutate(odds_ratio = ifelse(adj_p < 0.05,
-                             odds_ratio, 
-                             0)) %>%
-  select(gene_name = cluster, tissue = enhanced_tissues, exp = odds_ratio)
-
-
-query_clustering <-
-  query_data %>%
-  cluster_query(clustering = "ward.D2", distance_method = "binary")
-
-
-plot_data <-
-  query_data %>%
-  mutate(gene_name = factor(gene_name, query_clustering$gene$labels[query_clustering$gene$order]),
-         tissue = factor(tissue, query_clustering$sample$labels[query_clustering$sample$order]))
-
-gene_segments <-
-  dendro_data(query_clustering$gene)$segments %>%
-  as_tibble() %>%
-  rename(x = y,
-         y = x,
-         xend = yend,
-         yend = xend) %>%
-  mutate(segment_id = row_number()) %>%
-  gather(x_type, x_coord, x, xend) %>%
-  mutate(x_coord = - scales::rescale(x_coord,
-                                     c(0, 5)) + 0.5) %>%
-  spread(x_type, x_coord)
-
-sample_segments <-
-  dendro_data(query_clustering$sample)$segments %>%
-  as_tibble() %>%
-  mutate(segment_id = row_number()) %>%
-  gather(y_type, y_coord, y, yend) %>%
-  mutate(y_coord = scales::rescale(y_coord,
-                                   c(0, 5)) +
-           n_distinct(query_data$gene_name) + 0.5) %>%
-  spread(y_type, y_coord)
-
-
-plot_data %>%
-  left_join(fisher_res, by = c("gene_name"="cluster", "tissue"="enhanced_tissues")) %>%
-  filter(exp > 0) %>%
-  ggplot(aes(tissue, gene_name, size = exp, fill=tissue)) +
-  geom_point(show.legend = T, shape = 21) +
-  geom_segment(data = gene_segments,
-               aes(x, y, xend = xend, yend = yend),
-               inherit.aes = F) +
-  geom_segment(data = sample_segments,
-               aes(x, y, xend = xend, yend = yend),
-               inherit.aes = F) +
-  coord_fixed() +
-  scale_y_discrete(expand = expansion(0),
-                   position = "right") +
-  theme(panel.background = element_blank(),
-        panel.spacing = unit(0, "mm"),
-         plot.margin = unit(c(0,0,0,0), "mm"),
-        panel.grid =element_line(color="grey85"),
-        axis.title = element_blank(),
-        axis.ticks = element_blank(),
-        axis.text.x = element_text(angle = 90, vjust = 0.3, hjust = 1),
-        legend.position = "right") +
-  scale_fill_manual(values = tissue_colors)
-p
-```
-
-```{r New Fischer function}
-
+```{r HT - Fischer function}
+load("data/processed/all_partitions.Rdata")
 ### Fisher score
 clustering <- 
   all_partitions %>%
@@ -2655,76 +2456,8 @@ tissue_list <-
   split(ensg_id, enhanced_tissues)
 
 
-gene_fischer_test <-
-  function(cluster_membership, term_membership, alternative = "greater") {
-   
-    # cluster_membership <- clust_list 
-    # term_membership <- tissue_list 
-    n_genes <-
-      term_membership %>%
-      unlist() %>%
-      n_distinct()
-   
-    fisher_data <-
-      cluster_membership %>%
-      enframe("gene", "cluster") %>%
-      full_join(term_membership %>%
-                  map(enframe, "row", "gene") %>%
-                  bind_rows(.id = "term")) %>%
-      mutate(term = factor(term),
-             cluster = factor(cluster)) %>%
-      group_by(cluster, term, .drop = F) %>%
-      count() %>%
-      group_by(term) %>%
-      mutate(total_term = sum(n),
-             total_nonterm = n_genes - total_term) %>%
-      filter(!is.na(cluster) &
-               !is.na(term)) %>%
-      group_by(cluster) %>%
-      mutate(total_in_cluster = sum(n),
-             total_not_in_cluster = n_genes - total_in_cluster ) %>%
-      ungroup()
-       
-   
-   
-    fisher_data %>%
-      group_by(cluster, term) %>%
-      do({
-        g_data <<- .
-       
-        contingency_matrix <-
-          matrix(c(g_data$n,
-                   g_data$total_in_cluster - g_data$n,
-                   g_data$total_term - g_data$n,  
-                   g_data$total_nonterm - (g_data$total_term - g_data$n)),
-                 nrow = 2,
-                 dimnames =
-                   list(c("Term", "Nonterm"),
-                        c("In cluster", "Not in cluster")))
-       
-        contingency_matrix %>%
-          fisher.test(alternative = alternative) %>%
-          tidy() %>%
-          mutate(term_overlap = paste(contingency_matrix[1],
-                                      contingency_matrix[1] + contingency_matrix[3],
-                                      sep = "/"),
-                 cluster_membership = paste(contingency_matrix[1],
-                                            contingency_matrix[1] + contingency_matrix[2],
-                                            sep = "/"))
-      }) %>%
-      ungroup() %>%
-      mutate(p.value = ifelse(p.value == 0, .Machine$double.xmin, p.value),
-             adj_p = p.adjust(p.value, method = "BH")) %>%
-      rename(odds_ratio = estimate) %>%
-      arrange(adj_p)
-  }
-
 FT_medoids_zscore_pearson_70 <- 
   gene_fischer_test(cluster_membership = clust_list, term_membership = tissue_list)
-
-# very slow? compared to the previous
-
-
 
 
 fisher_res <- FT_medoids_zscore_pearson_70 %>% rename(enhanced_tissues = term)
@@ -2787,7 +2520,6 @@ cluster_query <-
   }
 
 
-library(ggdendro)
 
 query_data <-
   
@@ -2855,6 +2587,98 @@ plot_data %>%
         axis.text.x = element_text(angle = 90, vjust = 0.3, hjust = 1),
         legend.position = "right") +
   scale_fill_manual(values = tissue_colors)
+
+```
+
+```{r ANNOTATION REPORT}
+load("data/processed/all_partitions.Rdata")
+
+# Clustering information
+final_clustering <-
+  all_partitions %>% 
+  filter(id=="zscore pearson medoids 70")
+
+n_clusters <- final_clustering %>% pull(value) %>% unique() %>% length()
+
+# TIssue expression data
+data_tissue <-
+  tmm_data %>%
+  mutate(tissue = gsub('.{2}$', '', sample_ID)) %>%
+  group_by(tissue,enssscg_id) %>%
+  mutate(tissue_exp = mean(tmm)) %>%
+  select(enssscg_id, tissue, tissue_exp) %>%
+  unique()
+
+scaled_data <-
+  data_tissue %>%
+  group_by(enssscg_id) %>%
+  mutate(scaled_value = tissue_exp / max(tissue_exp)) %>%
+  ungroup()
+
+
+# GO enrichments
+GO_enrichments <- map(c("BP","CC","MF"),
+                      ~enrich(clustering = final_clustering, ontology_type = .x, orthologs = ortholog_info))
+
+#save(GO_enrichments, file = "data/processed/GO_enrichments.Rdata")
+load("data/processed/GO_enrichments.Rdata")
+
+r35 <- annotation_report(35)
+
+pdf("8.pdf", width = 7, height = 9)
+r8
+dev.off()
+
+reports_v5 <- map(c(1:n_clusters), ~annotation_report(.x))
+
+reports_v5[[35]] <- r35
+
+pdf("reports_v3.pdf", width = 7, height = 9)
+reports_v5
+dev.off()
+
+
+cluster_info <-
+  final_clustering %>% 
+  group_by(value) %>% 
+  count %>% 
+  rename(cluster = value,
+         nr_genes = n) %>% 
+  left_join(fisher_res %>% 
+              filter(adj_p<0.05) %>% 
+              select(cluster,enhanced_tissues) %>% 
+              ungroup() %>% 
+              group_by(cluster) %>%
+              summarize(enhanced_tissues = toString(enhanced_tissues)) %>%
+              ungroup %>% 
+              mutate(cluster = as.numeric(cluster)))
+
+GO_info <- bind_rows(GO_terms_BP,GO_terms_CC,GO_terms_MF)
+
+
+gene_description <- final_clustering %>% 
+  select(gene, cluster=value) %>% 
+  left_join(ortholog_info %>% select(gene=enssscg_id,human_id = ensg_id)) %>% 
+  left_join(geninfo %>% 
+  select(ensg_id,gene_name,gene_description), by = c("human_id" = "ensg_id")) %>% 
+  left_join(gene_info %>% 
+  select(ensg_id,specificity_category,distribution_category,enhanced_tissues), by= c("gene" = "ensg_id")) %>% 
+  arrange(cluster) 
+
+all
+
+
+all <- list(cluster_info, GO_info, gene_description)
+names(all) <- c("cluster_info","GO_info","gene_info")
+write_xlsx(all, path = "annotation.xlsx")
+
+library("xlsx")
+write.xlsx(cluster_info, file = "annotation.xlsx",
+      sheetName = "cluster_info", append = FALSE)
+write.xlsx(GO_info, file = "annotation.xlsx", 
+           sheetName="GO_info", append=TRUE)
+write.xlsx(gene_description, file = "annotation.xlsx",
+           sheetName="gene_info", append=TRUE)
 
 ```
 
@@ -2992,441 +2816,50 @@ sim_matrix %>%
 save(sim_matrix, file="data/processed/sim_matrix_zscore_euclidean_fasthclust_50.Rdata")
 ```
 
-```{r GO network}
+```{r}
 
-```
+data <- clustering %>% 
+  left_join(ortholog_info, by = c("gene" = "enssscg_id")) %>% 
+  select(ID = ensg_id, value) %>% 
+  na.omit() %>% 
+  left_join(GO_filtered) %>% 
+  na.omit()
 
+all_GO <- colnames(GO_sparse)[c(-1,-2)]
 
-
-
-
-
-```{r UMAP visualization - tests with Max}
-load("data/processed/data_scaled.Rdata")
-load("data/processed/pcas.Rdata")
-load("data/processed/pcas.Rdata")
-load("data/processed/louvain_multk.Rdata")
-load("data/processed/medoids_multk.Rdata")
-
-clustering <- louvain_multk[[1]][[1]]$cluster
-
-
-## UMAP
-
-clus_umap <- pcas[[1]]$scores %>%
-  set_rownames(gene_names) %>%
-  as.data.frame() %>%
-  select((1:10)) %>%
-  rownames_to_column("enssscg_id") %>%
-  umap_calc(row_names = "enssscg_id", n_neigh = 15, n_comp = 2) 
-
-clus_umap %>% umap_plot()
-                        
-clus_umap %>% 
-  left_join(clustering %>% 
-              dplyr::rename(features = 1, 
-                            cluster = 2)) %>% 
-  mutate(cluster = factor(cluster)) %>%
-  ggplot(aes(V1, V2, fill = cluster, color = cluster)) +
-  geom_point(size = 0.1) +
-  stat_density2d(bins = 2, h = 2) +
-  theme_bw()
-
-
-geom_density_2d(bins = 2, )
-  geom_density2d_filled(bins = 20)
-
-
-## Hexagonal
-  getmode <- function(v) {
-  uniqv <- unique(v)
-  as.character(uniqv[which.max(tabulate(match(v, uniqv)))])
-}
-clus_umap %>% 
-  left_join(clustering %>% 
-              dplyr::rename(features = 1, 
-                            cluster = 2)) %>% 
-  mutate(cluster = factor(cluster)) %>%
-  ggplot(aes(V1, V2, z = cluster, group = 1)) +
-  stat_summary_hex(fun = getmode,
-                   bins = 100,
-                   show.legend = F)
-## Density
-clus_umap %>% 
-  left_join(clustering %>% 
-              dplyr::rename(features = 1, 
-                            cluster = 2)) %>% 
-  mutate(cluster = factor(cluster)) %>%
-  ggplot(aes(V1, V2, group=cluster)) +
-  geom_density2d_filled(h = 10) +
-  facet_wrap(~cluster)
-
-
-#######
-
-density_settings <-
-  expand.grid(n = c(100,200,300,400),
-              h = c(0.02, 0.05, 0.1, 0.2)) %>% 
+GO_sparse <-
+  data %>%
+  rename(cluster = value) %>% 
+  mutate(cluster = as.character(cluster)) %>% 
+  mutate(value = 1) %>% 
+  #select(-ID) %>% 
+  pivot_wider(names_from = GOID, 
+              values_from = value, values_fill = 0) %>% 
+  group_by(cluster) %>% 
+  summarise(across(head(all_GO,1):tail(all_GO,1), sum)) %>% 
   as_tibble()
 
+rownames(GO_sparse)
 
-clus_umap_density_all <- 
-  density_settings %>% 
-  group_by_all() %>% 
-  do({
-    h <- .$h
-    n <- .$n
-    
-    clus_umap %>% 
-      left_join(clustering %>% 
-                  dplyr::rename(features = 1, 
-                                cluster = 2)) %>% 
-      mutate(cluster = factor(cluster)) %>%
-      group_by(cluster) %>%
-      do ({
-        data <- .
-        data %$%
-          MASS::kde2d(V1, V2, n = n, h = h, lims = c(range(clus_umap$V1), range(clus_umap$V2))) %>%
-          {.$z} %>%
-          as_tibble(rownames = "x") %>%
-          gather(y, density, -1) %>%
-          mutate(y = gsub("V", "", y),
-                 x = as.numeric(x),
-                 y = as.numeric(y))
-      })
-  })
-clus_umap_density <-
-  clus_umap %>% 
-  left_join(clustering %>% 
-              dplyr::rename(features = 1, 
-                            cluster = 2)) %>% 
-  mutate(cluster = factor(cluster)) %>%
-  group_by(cluster) %>%
-  do ({
-    data <- .
-    data %$%
-      MASS::kde2d(V1, V2, n = 300, h = 0.1, lims = c(range(clus_umap$V1), range(clus_umap$V2))) %>%
-      {.$z} %>%
-      as_tibble(rownames = "x") %>%
-      gather(y, density, -1) %>%
-      mutate(y = gsub("V", "", y),
-             x = as.numeric(x),
-             y = as.numeric(y))
-  })
+# GO_sparse %>% 
+#   column_to_rownames("cluster") %>% 
+#   pheatmap()
 
-clus_umap_density%>%
- # filter(n== 400, h == 0.05) %>%
-  mutate(x = scales::rescale(x, range(clus_umap$V1)),
-         y = scales::rescale(y, range(clus_umap$V2))) %>%
-  group_by(cluster) %>%
-  mutate(density = density/max(density)) %>%
-  ungroup () %>%
-  filter(density > 0.01) %>%
-  ggplot(aes(x,y,fill = cluster, alpha = density)) +
- # geom_encircle() +
-  geom_point(data = clus_umap %>% 
-               left_join(clustering, by = c("features" = "gene")), #%>% filter(value ==2),
-             aes(V1, V2),
-             size = 0.07,
-             inherit.aes = F) + 
-  geom_tile() +
-  theme_bw() +
-  scale_alpha_continuous(limits = c(0, 0.3), range = c(0.05, 0.6))
-  #facet_wrap(~cluster)#+
- # facet_grid(h ~ n)
+GO_sparse$cluster
 
+GO_pca <- 
+  GO_sparse %>% 
+  pca_calc(npcs = 200)
 
-clus_umap_density %>%
-  mutate(x = scales::rescale(x, range(clus_umap$V1)),
-         y = scales::rescale(y, range(clus_umap$V2))) %>%
-  group_by(cluster) %>%
-  mutate(density = density/max(density)) %>%
-  ungroup () %>%
-  filter(density > 0.01) %>%
-  ggplot(aes(x,y,fill = cluster, alpha = density)) 
-  
-clus_umap %>%
-  ggplot() +
-  geom_point(aes(V1, V2),
-             size = 0.1,
-             inherit.aes = F) 
+GO_umap <- 
+  GO_pca$scores %>%
+  as_tibble() %>%
+  mutate(cluster = GO_sparse$cluster) %>% 
+  select(c(1:40,"cluster")) %>% 
+  umap_calc(n_neigh = 15, row_names = "cluster")
 
-clus_umap_density %>%
-  mutate(x = scales::rescale(x, range(clus_umap$V1)),
-         y = scales::rescale(y, range(clus_umap$V2))) %>%
-  group_by(cluster) %>%
-  mutate(density = density/max(density)) %>%
-  ungroup () %>%
-  filter(density > 0.005) %>%
-  ggplot(aes(x,y,fill = cluster)) +
-  geom_tile()+
-  theme_bw() +
-  scale_fill_manual(values = pal)
-
-clus_umap %>%
-  left_join(clustering, by = c("features" = "gene")) %>%
-  ggplot(aes(V1,V2,color=as.factor(value))) +
-  geom_point(size=0.6) +
-  theme_bw() +
-  scale_color_manual(values = pal) #+
-  oose#facet_wrap(~value)
-
-library(pals)
-pal <- colorRampPalette(ocean.curl(60))(60)
-
-
-clus_umap_density %>%
-  filter(density > 0.1) %>% 
-  group_by(x, y) %>%
-  count %>% 
-  group_by(n) %>% 
-  count
-
-
-# clus_umap_density %>%
-#   filter(density>0.01) 
-#   ggplot(aes(density)) +
-#   geom_density() 
+umap_plot(GO_umap)
 
 ```
 
-```{Visual evaluation - test UMAP distance metrics (Louvain / Leiden)}
 
-umap <- scaled[[1]]$scaled %>%
-  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2)
-
-umap$umap %>%
-  left_join(res_kmeansfast[[1]]$cluster, by = c("features" = "gene")) %>%
-  ggplot(aes(x = V1, y = V2, color = as.factor(value))) +
-  geom_point(show.legend = F) +
-  theme_minimal() +
-  coord_fixed() 
-
-umap_corr <- pcas[[1]]$scores %>%
-  set_rownames(gene_names) %>%
-  as.data.frame() %>%
-  select((1:30)) %>%
-  rownames_to_column("enssscg_id") %>%
-  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2, met = "correlation")
-
-umap_manhattan <- pcas[[1]]$scores %>%
-  set_rownames(gene_names) %>%
-  as.data.frame() %>%
-  select((1:30)) %>%
-  rownames_to_column("enssscg_id") %>%
-  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2, met = "manhattan")
-
-umap_euclidean <- pcas[[1]]$scores %>%
-  set_rownames(gene_names) %>%
-  as.data.frame() %>%
-  select((1:30)) %>%
-  rownames_to_column("enssscg_id") %>%
-  umap_calc(row_names = "enssscg_id", n_neigh = 20, n_comp = 2, met = "euclidean")
-
-umaps <- list(umap_euclidean,umap_manhattan,umap_corr)
-
-save(umaps,
-     file = "data/processed/umaps.Rdata")
-
-
-load("data/processed/results_leiden.Rdata")
-load("data/processed/results_louvain.Rdata")
-
-# 2D clustering
-d <- dist_calc(df = umap$umap, comp = 2, m = "euclidean", 
-               id = distances[[1]]$id)
-c <- clust(dist = d$distance, k = 100, m = "fastkmeans", genes = gene_names, 
-           id = d$id)
-
-umap$umap %>%
-  left_join(clust_louvain[[1]]$cluster, by = c("features" = "gene")) %>%
-  ggplot(aes(x = V1, y = V2, color = as.factor(value))) +
-  geom_point(show.legend = F) +
-  theme_minimal() +
-  coord_fixed() +
-  scale_color_manual(values = pal) 
-
-
-d <- dist_calc(df = umap$umap, comp = 2, m = "euclidean", 
-               id = distances[[1]]$id)
-
-c <- clust(dist = d$distance, k = 100, m = "louvain", genes = gene_names, 
-           id = d$id)
-
-umaps[[3]]$umap %>%
-  left_join(clust_louvain[[1]]$cluster, by = c("features" = "gene")) %>%
-  ggplot(aes(x = V1, y = V2, color = as.factor(value))) +
-  geom_point(show.legend = F) +
-  theme_minimal() +
-  coord_fixed() +
-  scale_color_manual(values = pal) 
-
-
-
-load("data/processed/umaps.Rdata")
-
-
-df2 <- data.frame(value = as.numeric(medoids$cluster), gene = gene_names)
-umaps[[1]]$umap %>%
-  left_join(df2, by = c("features" = "gene")) %>%
-  ggplot(aes(V1, V2)) +
-   geom_hex(aes(fill = 1), fill = "gray90") +
-  theme_minimal() +
-  geom_encircle(aes(fill = value,
-                     color = value),
-                 alpha = 0.1,
-                 s_shape=1,
-                 expand=0,
-                 # color = "white",
-                 show.legend = F) +
-   geom_encircle(aes(color = value),
-                 fill = NA,
-                 alpha = 0.7,
-                 s_shape=1,
-                 expand=0,
-                 # color = "white",
-                 show.legend = F)# +
-#   geom_text(data = . %>%
-#               select(merged_cluster, mean_V1, mean_V2, n) %>%
-#               distinct(),
-#             aes(mean_V1, mean_V2, label = merged_cluster),
-#             show.legend = F)
-  
-  
-load("data/processed/results_louvain.Rdata")
-
-df2 <- data.frame(value = as.numeric(medoids$cluster), gene = gene_names)
-
-umaps[[1]]$umap %>%
-  left_join(clust_louvain[[1]]$cluster, by = c("features" = "gene")) %>%
-  head(200) %>%
-  ggplot(aes(x = V1, y = V2, color = as.factor(value))) +
-  theme_minimal() +
-  coord_fixed() +
-  scale_color_manual(values = pal)  + 
-    scale_fill_manual(values = pal)  + 
-
-  #geom_density_2d()
-#  stat_density_2d(aes(fill = value), geom="polygon")+ 
-# stat_ellipse()
-   geom_encircle(aes(group = value, fill = as.factor(value)),
-                alpha = 0.1, 
-                s_shape=1, 
-                expand=0,
-                #fill = "gray",
-               # color = "black",
-                show.legend = F)  +
-    geom_point(show.legend = F, size = 1) 
-  #   ggplot(aes(V1, V2)) +
-#   geom_hex(aes(fill = 1),
-#            data = plot_data,
-#            fill = "gray90",
-#            bins = plot_bins) +
-#   geom_encircle(aes(fill = merged_cluster,
-#                     color = merged_cluster),
-#                 alpha = 0.1,
-#                 s_shape=1,
-#                 expand=0,
-#                 # color = "white",
-#                 show.legend = F) +
-#   geom_encircle(aes(color = merged_cluster),
-#                 fill = NA,
-#                 alpha = 0.7,
-#                 s_shape=1,
-#                 expand=0,
-#                 # color = "white",
-#                 show.legend = F) +
-#   geom_text(data = . %>%
-#               select(merged_cluster, mean_V1, mean_V2, n) %>%
-#               distinct(),
-#             aes(mean_V1, mean_V2, label = merged_cluster),
-#             show.legend = F)
-  
-  
-
-pal <- colorRampPalette(ocean.curl(50))(50)
-
-  geom_encircle(aes(group = value),
-                alpha = 0.1, 
-                s_shape=1, 
-                expand=0,
-                fill = "gray",
-                color = "black",
-                show.legend = F) 
-#+ scale_color_manual(values = pal) 
-```
-
-```{r Cluster visualziation - UMAP}
-
-
-umap_louv %>% 
-  left_join(tissue_info, by= c("features" = "ensg_id")) %>%
-  filter(enhanced_tissues == "retina") %>%
-  ggplot(aes(V1,V2)) +
-  geom_point(data = t, aes(V1,V2), color = "grey", inherit.aes = F) +
-  geom_point(show.legend = F, color = tissue_colors[["retina"]]) +
-  
-  theme_minimal() +
-  #scale_color_manual(values = tissue_colors) +
-  coord_fixed()
-
-# For all tissues
-
-tissues <- unique(tissue_info$enhanced_tissues)
-t
-
-plots <- 
-  lapply(unique(tissue_info$enhanced_tissues),
-         function(tissue) {
-           umap_louv %>%
-             left_join(tissue_info, by= c("features" = "ensg_id")) %>%
-             filter(enhanced_tissues == tissue) %>%
-            ggplot(aes(V1,V2)) +
-              geom_point(data = t, aes(V1,V2), color = "grey", inherit.aes = F) +
-              geom_point(show.legend = F, color = tissue_colors[[tissue]]) +
-              theme_minimal() +
-              coord_fixed() +
-             ggtitle(tissue)
-         })
-
-pdf("umaps_tissues.pdf")
-plots
-dev.off()
-
-
-# Tissues for each cluster
-
-to_plot <- 
-  umap_louv %>%
-  left_join(tissue_info, by= c("features" = "ensg_id")) %>%
-  left_join(clustering, by = c("features" = "gene")) %>%
-  mutate (value = value+1)
-
-t <-
-  to_plot %>%
-  select(-value,-enhanced_tissues)
-
-tissue_colors[["NA"]] <- "grey30"
-
-p <- colorRampPalette(tableau_color_pal(palette = "Classic Cyclic")(13))(67)
-plots <- 
-  lapply(sort(unique(to_plot$value)),
-         function(cluster) {
-           to_plot %>%
-             filter(value == cluster)%>%
-             ggplot(aes(V1,V2,color=enhanced_tissues)) +
-             geom_point(data = t, aes(V1,V2), inherit.aes = F, 
-                        size = 0.5, color= "gray93") +
-             geom_point(show.legend = F, size = 0.5) +
-             theme_minimal() +
-             coord_fixed() +
-             ggtitle(paste("cluster",cluster)) + 
-             scale_color_manual(values = tissue_colors) 
-         })
-
-pdf("us.pdf")
-plots
-dev.off()
-
-
-```
