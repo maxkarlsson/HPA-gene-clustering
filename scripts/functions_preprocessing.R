@@ -41,7 +41,7 @@ tmm_normalize <- function(x, ...) {
 # Data scaling function
 
 data_scaling <- function(df,col_value,col_gene,col_sample, 
-                       log_transform = F, m = "zscore") {
+                         log_transform = F, m = "zscore") {
   
   if (log_transform == T) {
     df <-
@@ -53,7 +53,7 @@ data_scaling <- function(df,col_value,col_gene,col_sample,
       mutate(tmm = .data[[col_value]])
   }
   
-  if (m == "zscore") {
+  if (m == "zscore") { 
     df_scaled <-
       df %>%
       group_by(.data[[col_gene]]) %>%

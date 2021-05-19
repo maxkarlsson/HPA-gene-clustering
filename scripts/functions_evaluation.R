@@ -14,6 +14,7 @@ random_cluster <- function (k,l, names) {
 
 
 # Transform results to dataframe
+
 clusters_to_df <- function (res_list, gene_names) {
   df <- data.frame()
   times <- data.frame()
@@ -49,10 +50,7 @@ eval <- function(clustering, genes, dis) {
   else { #if (!grepl("2D",id))
     d <- dis$distance
   } 
-  # else {
-  #   d <- dis[[1]]$distance
-  # }
-  
+
   r <- 
     clustering$cluster %>%
     select(gene,value) %>%
@@ -74,8 +72,8 @@ eval <- function(clustering, genes, dis) {
   c_stats <- summary(c)
   
   asw_index <- c_stats$avg.width
-    
-    
+  
+  
   bio_index <- 
     if(require("Biobase") && require("annotate") && require("GO.db") &&
        require("org.Hs.eg.db")) {
@@ -96,13 +94,13 @@ eval <- function(clustering, genes, dis) {
   
   # Profile clusters (with universe)
   ck <- try(compareCluster(geneClusters = cluster_list, 
-                             fun = "enrichGO", 
-                             OrgDb = org.Hs.eg.db, 
-                             ont = "BP", 
-                             universe = as.character(r$entrez),
-                             pAdjustMethod = "BH",
-                             pvalueCutoff = 0.05, 
-                             qvalueCutoff = 0.05))
+                           fun = "enrichGO", 
+                           OrgDb = org.Hs.eg.db, 
+                           ont = "BP", 
+                           universe = as.character(r$entrez),
+                           pAdjustMethod = "BH",
+                           pvalueCutoff = 0.05, 
+                           qvalueCutoff = 0.05))
   
   ck_tibble <- as_tibble(ck) 
   
@@ -118,9 +116,10 @@ eval <- function(clustering, genes, dis) {
                     BP_enriched = bio2_index,
                     time = as.numeric(clustering$time, units = "secs")
   ))
-  }
+}
 
 
+# Generate a data frame from evaluation reports
 eval_to_df <- function (eval_list) {
   res_l <- c()
   res <- data.frame()
@@ -176,6 +175,8 @@ eval_to_df <- function (eval_list) {
 
 
 
+# Calculate enrichment using clusterProfiler
+
 enrich <- function (clustering,ontology_type="BP",orthologs) {
   clustering <-
     clustering %>%
@@ -194,37 +195,27 @@ enrich <- function (clustering,ontology_type="BP",orthologs) {
     cluster_list[[as.character(i)]] <- genes
   }
   
+  
+# Calculate enrichments for a df
+  
+enrichments_df <- function(df, grouping, orthologs) {
+    
+    res <- df %>%
+      group_by(.data[[grouping]]) %>%
+      do({
+        subset <- .
+        
+        enrichment <-
+          enrich(clustering = subset, orthologs = orthologs) %>%
+          mutate(id = unique(subset$id))
+      })
+    
+  }
+  
+  
   # Profile clusters (with universe)
   ck <- try(compareCluster(geneClusters = cluster_list, 
-                       fun = "enrichGO", 
-                       OrgDb = org.Hs.eg.db, 
-                       ont = ontology_type, 
-                       universe = as.character(clustering$entrez),
-                       pAdjustMethod = "BH",
-                       pvalueCutoff = 1, 
-                       qvalueCutoff = 1))
-  
-  ck_tibble <- as_tibble(ck) 
-  
-  bio_index <-
-    length(unique(as.numeric(ck_tibble$Cluster)))/(num_clus+1)
-  
-  return(list(enriched_terms = ck_tibble,
-         enrichment_score = bio_index))
-  
-}
-
-enrich_cluster <- function (clustering,num,ontology_type="BP",orthologs) {
-  clustering2 <-
-    clustering %>%
-    filter(value == num) %>%
-    left_join(orthologs, by = c("gene" = "enssscg_id")) %>%
-    na.omit() %>%
-    dplyr::select(entrez,value)
-  
-  gene_list <- clustering2$entrez
-  # Profile clusters (with universe)
-  ck <- try(enrichGO(gene = gene_list, 
+                           fun = "enrichGO", 
                            OrgDb = org.Hs.eg.db, 
                            ont = ontology_type, 
                            universe = as.character(clustering$entrez),
@@ -233,14 +224,45 @@ enrich_cluster <- function (clustering,num,ontology_type="BP",orthologs) {
                            qvalueCutoff = 1))
   
   ck_tibble <- as_tibble(ck) 
-
   
-  return(ck_tibble)
+  bio_index <-
+    length(unique(as.numeric(ck_tibble$Cluster)))/(num_clus+1)
+  
+  return(list(enriched_terms = ck_tibble,
+              enrichment_score = bio_index))
   
 }
 
 
-## Best k
+# Calculate enrichment scores
+
+enrichment_scores <- function(df,grouping) {
+  
+  df %>%
+    group_by(.data[[grouping]]) %>%
+    do ({
+      data <- .
+      min_significance <- data %>%
+        mutate(log_qvalue = -log10(qvalue)) %>%
+        group_by(Cluster) %>% 
+        summarize(max(log_qvalue),na.rm = T) %>% 
+        pull(`max(log_qvalue)`) %>% na.omit() %>% mean() 
+      annotability <- length(data %>%
+                               filter(qvalue < 0.05) %>% pull(Cluster) %>% sort() %>% unique())/
+        length(data %>% pull(Cluster) %>% sort() %>% unique())
+      data.frame(id = unique(data$id), min_significance = min_significance, annotability = annotability)
+      
+    })
+}
+
+enrichment_scores_kmeans <-
+  map(enrichments_kmeans,
+      ~enrichment_scores(df = .x, grouping = "id")) 
+
+
+
+# Find clustering with the best k
+
 find_bestk <- function (results,measures,plot = F, n=1) {
   best_id <-
     results %>%
@@ -250,11 +272,11 @@ find_bestk <- function (results,measures,plot = F, n=1) {
       data <- .
       if (unique(data$measure) == "connectivity_index") {
         data %>%
-          mutate(rank= rank(value,ties.method = "random"))
+          mutate(rank= rank(value,ties.method = "average"))
       }
       else {
         data %>%
-          mutate(rank = rank(-(value),ties.method = "random"))
+          mutate(rank = rank(-(value),ties.method = "average"))
       }
     }) %>%
     group_by(id) %>%
@@ -290,6 +312,34 @@ find_bestk <- function (results,measures,plot = F, n=1) {
   
 }
 
+# Rank clustering 
+
+clust_rank <- function (results,measures) {
+  ranked <-
+    results %>%
+    filter(measure %in% measures) %>%
+    group_by(measure) %>%
+    do ({
+      data <- .
+      if (unique(data$measure) == "connectivity_index") {
+        data %>%
+          mutate(rank= rank(value,ties.method = "average"))
+      }
+      else {
+        data %>%
+          mutate(rank = rank(-(value),ties.method = "average"))
+      }
+    }) %>%
+    group_by(id) %>%
+    mutate(avg_rank = mean(rank)) %>%
+    group_by(id) %>%
+    arrange(avg_rank) 
+  
+  return(ranked)
+}
+
+
+# Add 2D and random clustering
 
 add_clusterings <- function(df, ref_clust, dist, pca, gene_names, dist_m = "euclidean",
                             clust_m = "fasthclust", orthologs) {
@@ -311,8 +361,8 @@ add_clusterings <- function(df, ref_clust, dist, pca, gene_names, dist_m = "eucl
           genes = gene_names)
   
   clustering_2D <- list(cluster = clustering_2d$cluster, 
-                       id = paste("zscore ", dist_m, "2D ", clust_m,  sep = ""), 
-                       time = clustering_2d$time)
+                        id = paste("zscore ", dist_m, "2D ", clust_m,  sep = ""), 
+                        time = clustering_2d$time)
   
   eval_2D <- eval(clustering = clustering_2D, genes = ortholog_info, dis = dist_2d)
   
@@ -331,15 +381,16 @@ add_clusterings <- function(df, ref_clust, dist, pca, gene_names, dist_m = "eucl
   
   eval_random <- eval(clustering = clustering_random, genes = ortholog_info, dis = dist)
   
-  
   # Transform
   ev_extra <- list(eval_2D,eval_random)
   ev_extra <- eval_to_df(ev_extra)
   
   return(bind_rows(df,ev_extra$res))
   
-  }
+}
 
+
+# Transform lists of results into data frames
 
 to_df <- function(multk, add_random = T) {
   
@@ -374,6 +425,9 @@ to_df <- function(multk, add_random = T) {
   )
 }
 
+
+# Merge data frames
+
 merge_all_df <- function(list_df) {
   df <- data.frame()
   for (i in c(1:6)) {
@@ -385,22 +439,55 @@ merge_all_df <- function(list_df) {
   return(df)
 }
 
-enrichments_df <- function(df, grouping, orthologs) {
+
+
+
+# Calculate omega squared from ANOVA results
+
+omega_sq <- function(aov_in, neg2zero=T){
+  aovtab <- summary(aov_in)[[1]]
+  n_terms <- length(aovtab[["Sum Sq"]]) - 1
+  output <- rep(-1, n_terms)
+  SSr <- aovtab[["Sum Sq"]][n_terms + 1]
+  MSr <- aovtab[["Mean Sq"]][n_terms + 1]
+  SSt <- sum(aovtab[["Sum Sq"]])
+  for(i in 1:n_terms){
+    SSm <- aovtab[["Sum Sq"]][i]
+    DFm <- aovtab[["Df"]][i]
+    output[i] <- (SSm-DFm*MSr)/(SSt+MSr)
+    if(neg2zero & output[i] < 0){output[i] <- 0}
+  }
+  output <- c(output, 1 - sum(output))
+  names(output) <- c(rownames(aovtab)[1:n_terms], "Residuals")
   
-  res <- df %>%
-    group_by(.data[[grouping]]) %>%
-    do({
-      subset <- .
-      
-      enrichment <-
-        enrich(clustering = subset, orthologs = orthologs) %>%
-        mutate(id = unique(subset$id))
-    })
+  return(output)
+} 
+
+
+
+# Scale performance result and rank
+
+scaled_rank <- function(results,measures) {
+  results %>% 
+    filter(measure %in% measures) %>%
+    group_by(measure) %>%
+    do ({
+      data <- .
+      if (unique(data$measure) == "connectivity_index") {
+        data %>%
+          mutate(scaled_value=  scales::rescale(-value,c(0,1)))
+      }
+      else {
+        data %>%
+          mutate(scaled_value=  scales::rescale(value,c(0,1)))
+      }
+    }) %>%
+    ungroup() %>% 
+    group_by(id) %>%
+    mutate(avg_value = mean(scaled_value)) %>%
+    group_by(id) %>%
+    arrange(-avg_value)  
   
 }
-
-
-
-
 
 

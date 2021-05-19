@@ -24,6 +24,7 @@ dist_calc <- function(df,comp,m,id=NULL) {
   }
 }
 
+
 # Clustering function
 
 clust <- function(dist, k = 10, m, genes, id = NULL, r = 10) { #mult_k = F, mult_r = F
@@ -114,7 +115,6 @@ clust <- function(dist, k = 10, m, genes, id = NULL, r = 10) { #mult_k = F, mult
     res <- flashClust(dist, method = "ward", members = NULL)
     res <- res %>% cutree(k) %>% dplyr::as_tibble(rownames = "gene") %>%
       column_to_rownames("gene")
-    #res$value = as.factor(res$value)
   }
   
   end_time <- Sys.time()
@@ -127,6 +127,5 @@ clust <- function(dist, k = 10, m, genes, id = NULL, r = 10) { #mult_k = F, mult
   return(list(cluster = res,
               time = total_time,
               id = paste(id,m,as.character(k))))
-  # }
 }
 

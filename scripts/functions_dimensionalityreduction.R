@@ -69,7 +69,6 @@ pca_plot <- function(data) {
 }
 
 
-
 # UMAP function
 
 umap_calc <- function (data, row_names, n_neigh, n_comp = 2, n_ep = 1000, color_tissue = F, met = "euclidean") {
@@ -131,15 +130,15 @@ umap_plot <- function (umap_res, color_by = NULL, color_groups = NULL) {
     }
   
   else if (color_by == "cluster") {
-    pal <- colorRampPalette(ocean.curl(130))(130)
-    
+    num_clusters <- length(unique(color_groups$value))
+    pal <- colorRampPalette(tableau_color_pal(palette = "Classic Cyclic")(13))(num_clusters)
     uplot <-
       umap_res %>%
-      mutate(enssscg_id = gene_names) %>%
-      left_join(color_groups, by = c("enssscg_id" = "gene")) %>%
+    #  mutate(enssscg_id = gene_names) %>%
+      left_join(color_groups, by = c("features" = "gene")) %>%
       ggplot(aes(V1,V2, color = as.factor(value))) +
-      geom_point(show.legend = F) +
-      theme_minimal() +
+      geom_point(show.legend = F, size = 0.3) +
+      theme_simple +
       scale_color_manual(values = pal) +
       coord_fixed()
     
@@ -153,6 +152,36 @@ umap_plot <- function (umap_res, color_by = NULL, color_groups = NULL) {
       theme_minimal()+
       coord_fixed()
   }
-  umap_plot
-  return(uplot)
+
+    return(uplot)
+}
+
+
+# Plot clusteirng solution on UMAP
+
+clustering_umaps <- function(name, umaps, partitions) { #, 
+  partition <-
+    partitions %>% 
+    filter(id == name)
+  
+  if(grepl("zscore euclidean",name)) {
+    umap <- umaps$`zscore euclidean`
   }
+  
+  else if(grepl("zscore pearson",name)) {
+    umap <- umaps$`zscore correlation`
+  }
+  else if(grepl("max euclidean",name)) {
+    umap <- umaps$`max euclidean`
+  }
+  else if(grepl("max pearson",name)) {
+    umap <- umaps$`max correlation`
+  }
+  else if(grepl("random",name)) {
+    umap <- umaps$`zscore correlation`
+  }
+  
+  
+  umap_plot(umap_res = umap, color_by = "cluster", color_groups = partition) +
+    ggtitle(name)
+}
