@@ -515,7 +515,7 @@ clus_umap %>%
   left_join(clust_louvain$cluster, 
             by = c("features" = "gene")) %>%
   ggplot(aes(V1,V2, color = as.factor(value))) +
-  geom_point(show.legend = F) +
+  geom_point(show.legend = F, size = 0.2) +
   theme_minimal() +
   # scale_color_manual(values = pal) +
   coord_fixed()

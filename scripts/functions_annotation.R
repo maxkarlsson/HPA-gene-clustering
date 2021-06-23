@@ -2,7 +2,7 @@
 
 gene_fischer_test <-
   function(cluster_membership, term_membership, alternative = "greater") {
-    
+    require(broom)
     # cluster_membership <- clust_list 
     # term_membership <- tissue_list 
     n_genes <-
