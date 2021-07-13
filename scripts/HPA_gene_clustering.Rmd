@@ -227,7 +227,7 @@ colors <-
 # This run ID is used to check whether the run is already performed. 
 # In that case files will be reloaded instead of rerunning calculations.
 run_id <- 
-  "5sds_5res"
+  "test"
 run_file <- 
   paste0("data/processed/clusters_", run_id, ".rds")
 
@@ -282,7 +282,7 @@ if(file.exists(run_file)) {
                             seed = 1:5,
                             resolution = c(0.5, 1, 2, 4, 8),
                             npcs = 30,
-                            log_transform = F, 
+                            log_transform = T, 
                             run_id = paste(run_id, 
                                            unique(g_data$dataset_id),
                                            sep = "_"))
@@ -328,6 +328,27 @@ all_data_dists_filenames <-
   filter(grepl("_dist_", filename)) %>% 
   mutate(dataset_id = gsub(paste0(".*", run_id, "_|_dist_.*$"), "", filename)) %$% 
   set_names(filename, dataset_id) 
+
+# all_data_graphs <- 
+#   list.files("data/processed/", full.names = T) %>% 
+#   enframe("i", "filename") %>% 
+#   filter(grepl(run_id, filename)) %>% 
+#   filter(grepl("neighbors", filename)) %>% 
+#   #filter(!grepl("log", filename)) %>% 
+#   mutate(dataset_id = gsub(paste0("data/processed/", run_id, "_|_neighbors_.*$"), "", filename)) %$% 
+#   set_names(filename, dataset_id) %>%
+#   lapply(function(filename_) readRDS(filename_))
+# 
+# # Distance files are very big, so just read when used: (MODIFIED)
+# all_data_dists_filenames <- 
+#   list.files("data/processed/", full.names = T) %>% 
+#   enframe("i", "filename") %>% 
+#   filter(grepl(run_id, filename)) %>% 
+#   filter(grepl("_dist_", filename)) %>% 
+#   #filter(!grepl("log", filename)) %>% 
+#   mutate(dataset_id = gsub(paste0("data/processed/",run_id, "_|_dist*.*$"), "", filename)) %$% 
+#   set_names(filename, dataset_id) 
+
 
 ```
 
@@ -752,7 +773,7 @@ all_data_cluster_MI %>%
   scale_x_log10() +
   facet_grid( ~ dataset_id, scales = "free_y") +
   theme_bw() +
-  ggtitle("Connectivity and Silhouette index")
+  ggtitle("Mutual information")
 
 
 #save(MI, file = "data/processed/MI.Rdata")
@@ -810,6 +831,13 @@ if(file.exists(UMAP_file)) {
 all_graph_umap_data <- 
   all_graph_umaps %>% 
   left_join(final_cluster) 
+
+
+all_data_graphs$celline$snn %>% 
+        RunUMAP(umap.method = "umap-learn") %>% 
+        {.@cell.embeddings} %>% 
+        as_tibble(rownames = "gene") 
+
 
 
 all_graph_umap_data %>% 
@@ -965,7 +993,6 @@ ggsave(run_id_savename("UMAP scaled hulls.pdf"),
 
 ## plots
 ```{r}
-
 
 graph_umap_data %>% 
   ggplot(aes(V1, V2, color = factor(cluster))) +
