@@ -309,3 +309,33 @@ list_all_object_sizes <-
       arrange(-Gb)
     
   }
+
+
+color_mean <- 
+  function(z) {
+    col2rgb(z) %>%
+      t() %>%
+      as_tibble() %>%
+      summarise(red = mean(red),
+                green = mean(green),
+                blue = mean(blue)) %$%
+      rgb(red, green, blue, maxColorValue = 255)
+    
+    # rnorm(1)
+    
+    
+  }
+
+makeHexData <- function(x, y, z, bins, bin_fun) {
+  
+  h <- 
+    hexbin::hexbin(x, y, bins, 
+                   xbnds = range(x),
+                   ybnds = range(y), 
+                   IDs = TRUE)
+  
+  hexbin::hcell2xy(h) %>% 
+    as_tibble() %>% 
+    mutate(z = tapply(z, h@cID, FUN = bin_fun),
+           cid = h@cell)
+}
