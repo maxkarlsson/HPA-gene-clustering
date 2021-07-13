@@ -84,6 +84,7 @@ calculate_pca <- function(data, npcs) {
     dplyr::rename(R2cum = 3)
   
   list(pca = pca_res,
+       sdev = pcaMethods::sDev(pca_res),
        scores = pcaMethods::scores(pca_res),
        loadings = pcaMethods::loadings(pca_res),
        stats = pca_stats) %>%
