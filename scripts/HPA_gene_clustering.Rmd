@@ -29,6 +29,9 @@ library(aricode)
 library(clValid)
 library(infotheo)
 library(ggheatmap)
+library(multidplyr)
+library(clue)
+
 
 source("scripts/functions_preprocessing.R")
 source("scripts/functions_dimensionalityreduction.R")
@@ -175,8 +178,6 @@ GOterms <-
   filter(ensg_id %in% all_genes_in_data)
 
 
-
-
 ```
 
 
@@ -227,7 +228,7 @@ colors <-
 # This run ID is used to check whether the run is already performed. 
 # In that case files will be reloaded instead of rerunning calculations.
 run_id <- 
-  "test"
+  "test_100PCs"
 run_file <- 
   paste0("data/processed/clusters_", run_id, ".rds")
 
@@ -255,6 +256,28 @@ expressed_genes <-
   filter(max_exp >= 1) %>% 
   select(1, 2)
 
+# Prepare cluster for parallelization
+cluster <- new_cluster(n = 6)
+cluster_library(cluster, c("dplyr",
+                           "tidyverse",
+                           "factoextra",
+                           "pcaMethods",
+                           "Seurat",
+                           "magrittr",
+                           "cluster",
+                           "clValid")) 
+cluster_copy(cluster, c("HPA_gene_clustering", 
+                        "generate_savefile", 
+                        "scale_data",
+                        "calculate_pca",
+                        "calculate_distance",
+                        "cluster_genes",
+                        "run_id", 
+                        "run_file", 
+                        "run_id_savename"))
+
+
+# start_time <- Sys.time()
 
 if(file.exists(run_file)) {
   all_data_cluster <- 
@@ -267,7 +290,8 @@ if(file.exists(run_file)) {
           gather(sample_id, tmm, -1)) %>% 
     bind_rows(.id = "dataset_id") %>% 
     inner_join(expressed_genes) %>% 
-    group_by(dataset_id) %>%
+    group_by(dataset_id) %>%      
+    partition(cluster) %>% 
     do({
       g_data <<- .
       
@@ -277,24 +301,29 @@ if(file.exists(run_file)) {
                             col_gene = "ensg_id", 
                             col_sample = "sample_id", 
                             scaling = "zscore",
-                            distance_metric = "pearson",
+                            distance_metric = "spearman",
                             clustering_method = "louvain",
-                            seed = 1:5,
-                            resolution = c(0.5, 1, 2, 4, 8),
-                            npcs = 30,
-                            log_transform = T, 
+                            seed = 1:10,
+                            resolution = seq.int(1, 8, by = 0.5),
+                            npcs = 100,
+                            log_transform = F, 
                             run_id = paste(run_id, 
                                            unique(g_data$dataset_id),
                                            sep = "_"))
       
       cluster_res$cluster_data
     }) %>%
+    collect() %>% 
     ungroup()
   
   saveRDS(all_data_cluster, 
           run_file)
 }
 
+# end_time <- Sys.time()
+# 
+# total_time <- end_time - start_time
+# 
 
 cluster_palette <- 
   colorRampPalette(ggthemes::tableau_color_pal(palette = "Classic Cyclic")(13))(n_distinct(all_data_cluster$cluster))
@@ -329,29 +358,89 @@ all_data_dists_filenames <-
   mutate(dataset_id = gsub(paste0(".*", run_id, "_|_dist_.*$"), "", filename)) %$% 
   set_names(filename, dataset_id) 
 
-# all_data_graphs <- 
-#   list.files("data/processed/", full.names = T) %>% 
-#   enframe("i", "filename") %>% 
-#   filter(grepl(run_id, filename)) %>% 
-#   filter(grepl("neighbors", filename)) %>% 
-#   #filter(!grepl("log", filename)) %>% 
-#   mutate(dataset_id = gsub(paste0("data/processed/", run_id, "_|_neighbors_.*$"), "", filename)) %$% 
+# all_data_graphs <-
+#   list.files("data/processed/", full.names = T) %>%
+#   enframe("i", "filename") %>%
+#   filter(grepl(run_id, filename)) %>%
+#   filter(grepl("neighbors", filename)) %>%
+#   filter(!grepl("log", filename)) %>%
+#   mutate(dataset_id = gsub(paste0("data/processed/", run_id, "_|_neighbors_.*$"), "", filename)) %$%
 #   set_names(filename, dataset_id) %>%
 #   lapply(function(filename_) readRDS(filename_))
-# 
-# # Distance files are very big, so just read when used: (MODIFIED)
-# all_data_dists_filenames <- 
-#   list.files("data/processed/", full.names = T) %>% 
-#   enframe("i", "filename") %>% 
-#   filter(grepl(run_id, filename)) %>% 
-#   filter(grepl("_dist_", filename)) %>% 
-#   #filter(!grepl("log", filename)) %>% 
-#   mutate(dataset_id = gsub(paste0("data/processed/",run_id, "_|_dist*.*$"), "", filename)) %$% 
-#   set_names(filename, dataset_id) 
+# # 
+# # # Distance files are very big, so just read when used: (MODIFIED)
+# all_data_dists_filenames <-
+#   list.files("data/processed/", full.names = T) %>%
+#   enframe("i", "filename") %>%
+#   filter(grepl(run_id, filename)) %>%
+#   filter(grepl("_dist_", filename)) %>%
+#   filter(!grepl("log", filename)) %>%
+#   mutate(dataset_id = gsub(paste0("data/processed/",run_id, "_|_dist*.*$"), "", filename)) %$%
+#   set_names(filename, dataset_id)
 
 
 ```
 
+## Selection of informative PCs
+```{r}
+# Read PCA data
+
+all_data_pca <- 
+  list.files("data/processed/", full.names = T) %>% 
+  enframe("i", "filename") %>% 
+  filter(grepl(run_id, filename)) %>% 
+  filter(grepl("pca", filename)) %>% 
+  mutate(dataset_id = gsub(paste0(".*", run_id, "_|_pca_.*$"), "", filename)) %$% 
+  set_names(filename, dataset_id) %>%
+  lapply(function(filename_) readRDS(filename_))
+
+# Retrieve number of informative PCs
+
+informative_pc <-
+  all_data_pca %>% 
+  sapply(function(pca)
+    pc <- pca$sdev[pca$sdev >= 1] %>% tail(1) %>% enframe() %$% name) 
+
+
+met <- dataset_metadata %>% 
+  left_join(informative_pc %>% 
+              enframe %>% 
+              rename(PC = value) %>%  
+              mutate(PC = as.numeric(gsub("PC", "", PC))) , by = c("dataset_id" = "name"))
+
+met %>% 
+  pull(dataset_id) %>% 
+  map(~ all_data_pca[[.x]]$sdev %>% 
+        enframe() %>% 
+        rename(PC = name, sd = value) %>%  
+        mutate(PC = as.numeric(gsub("PC", "", PC))) %>% 
+        ggplot(aes(PC,sd)) + 
+        geom_point() +
+        geom_line() +
+        ggtitle(paste0("PCA ", .x)) + 
+        geom_vline(xintercept = met %>%  filter(dataset_id == id) %>%  pull(PC), linetype="dotted") +
+        theme_bw())
+
+met %>% 
+  pull(dataset_id) %>% 
+  {
+    ids <- . 
+    ids %>% 
+      map(~all_data_pca[[.x]]$stats) %>%
+      set_names(ids) %>% 
+      bind_rows(.id = "dataset_id")
+  } %>% 
+  ggplot(aes(PC,R2cum)) +
+  geom_point() +
+  geom_line() +
+  theme_bw() +
+  facet_wrap(~dataset_id, scales = "free_x")+
+  #scale_x_continuous(breaks=seq(0, 100, 10)) +
+  theme_bw() +
+  geom_vline(data=met, aes(xintercept = PC), linetype = "dashed")
+
+```
+ 
 ## Clustering association
 
 ```{r}
@@ -453,13 +542,14 @@ if(file.exists(ARI_file)) {
 }
 
 
+
 ARI_res %>% 
   filter(resolution1 == resolution2,
          seed1 < seed2) %>% 
   ggplot(aes(resolution1, ARI, color = dataset_id)) +
   geom_point() +
   geom_smooth() +
-  scale_x_log10() +
+ # scale_x_log10() +
   facet_grid(dataset_id~.) +
   theme_bw() +
   ggtitle("Replicate clustering stability")
@@ -475,12 +565,56 @@ ARI_res %>%
   column_to_rownames("resolution_seed1") %>% 
   pheatmap()
 
+to_cluster <- function(cluster_df) {
+  v <- cluster_df$cluster
+  names(v) <- cluster_df$gene
+  return(v)
+}
 
+# Alternative
+ARI_res_2 <- 
+  all_data_cluster %>% 
+  group_by(dataset_id, resolution) %>% 
+  do({
+    dat <<- .
+    combn(1:max(dat$seed), m=2, function(x)   
+                 ARI(dat %>% filter(seed == x[1]) %>% select(gene,cluster) %>%  to_cluster(), 
+                           dat %>%  filter(seed == x[2]) %>% select(gene,cluster) %>%  to_cluster())) %>% 
+      as_tibble()
+  })
+
+
+ARI_res_2 <- 
+  all_data_cluster %>% 
+  group_by(dataset_id, resolution) %>% 
+  do({
+    dat <<- .
+    
+    combn(1:max(dat$seed), m=2) %>% 
+      t() %>% 
+      as_tibble() %>% 
+      set_names(c("seed1", "seed2")) %>% 
+      group_by_all() %>% 
+      mutate(ARI = ARI(dat %>% filter(seed == seed1) %>% select(gene,cluster) %>%  to_cluster(), 
+                       dat %>%  filter(seed == seed2) %>% select(gene,cluster) %>%  to_cluster()))
+    
+  }) %>% 
+  ungroup()
+
+
+
+ARI_res_2 %>% 
+  mutate(ARI = value) %>% 
+  ggplot(aes(resolution, ARI, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  facet_grid(dataset_id~.) +
+  theme_bw() +
+  ggtitle("Replicate clustering stability")
 
 ```
 
-## Connectivity & Average Silhouette
-
+## Connectivity & Average Silhouette 
 ```{r Evaluation (connectivity, dunn, asw, BHI, BP_enriched, time)}
 
 connectivity_file <- 
@@ -597,11 +731,26 @@ all_data_cluster_connectivity %>%
   ggplot(aes(resolution, value, color = dataset_id)) +
   geom_point() +
   geom_smooth() +
-  scale_x_log10() +
+ # scale_x_log10() +
   facet_grid(metric ~ dataset_id, scales = "free_y") +
   theme_bw() +
   ggtitle("Connectivity and Silhouette index")
 
+
+
+all_data_cluster_connectivity %>% 
+  left_join(all_data_cluster %>% 
+              group_by(dataset_id,resolution, seed) %>% 
+              mutate(k = max(cluster) + 1) %>% 
+              select(-gene,-cluster) %>% 
+              distinct) %>% 
+  gather(metric, value, connectivity, avg_silhouette_width) %>% 
+  ggplot(aes(k, value, color = as.factor(resolution))) +
+  geom_point() +
+  geom_smooth() +
+  facet_grid(metric ~ dataset_id, scales = "free_y") +
+  theme_bw() +
+  ggtitle("Connectivity and Silhouette index")
 
 
 ```
@@ -609,7 +758,7 @@ all_data_cluster_connectivity %>%
 ##MI
 ```{r Evaluation based on Mutual Information}
 
-MI_file <- 
+MI_file <- ## Connectivity & Average Silhouette
   paste0("data/processed/", run_id, "_MI.rds")
 MI_random_data_file <- 
   paste0("data/processed/", run_id, "_MI_rand_data.tsv")
@@ -624,7 +773,9 @@ MI_GOterms <-
   mutate(n_genes = n_distinct(ensg_id)) %>% 
   ungroup() %>% 
   filter(n_genes <= 500, 
-         n_genes >= 3)
+          n_genes >= 3) # %>% 
+  # filter(GO_domain == "biological_process") %>% 
+  # select(ensg_id, GO_accession, n_genes)
 
 
 n_random_clustering <- 
@@ -778,8 +929,202 @@ all_data_cluster_MI %>%
 
 #save(MI, file = "data/processed/MI.Rdata")
 
+
+
+
+
+
+
+# Alternative
+
+
+# Prepare cluster for parallelization
+cluster <- new_cluster(n = 6)
+
+cluster_library(cluster, c("dplyr",
+                           "tidyverse",
+                           "infotheo"))
+
+cluster_copy(cluster, c("MI_random_data_file",
+                        "random_clustering",
+                        "all_data_cluster",
+                        "GOterms"))
+
+# 1. Create random_MI file
+
+if(file.exists(MI_random_data_file)) {
+  rand_MI_data <- 
+    readRDS(MI_random_data_file)
+} else {
+  
+  random_clustering <- 
+    map(c(1:n_random_clustering), function(x)
+      all_data_cluster %>% 
+        filter(seed == 1) %>% 
+        group_by(dataset_id, resolution) %>% 
+        do ({
+          dat <<- .
+          dat %>% 
+            mutate(cluster = sample(cluster))
+        }) %>% 
+        mutate(run = x))  %>% 
+    reduce(full_join)                    
+  
+  rand_MI_data <- 
+    random_clustering %>% 
+    group_by(dataset_id, resolution, seed, run) %>% 
+    partition(cluster) %>% 
+    do({
+      g_data <<- .
+      
+      g_GOterms <- 
+        GOterms %>% 
+        filter(ensg_id %in% g_data$gene)
+      
+      g_data %>%
+        ungroup() %>% 
+        left_join(g_GOterms,
+                  by = c("gene" = "ensg_id")) %>%
+        summarise(MI = mutinformation(cluster, GO_accession)) 
+    }) %>% 
+    collect() %>% 
+    ungroup() %>% 
+    group_by(dataset_id, resolution, seed) %>% 
+    summarise(mean = mean(MI), 
+              sd = sd(MI))%>% 
+     select(-seed)
+  
+  write_tsv(rand_MI_data, MI_random_data_file)
+}
+
+# 2. Calculate MI in parallel for all clusterings 
+cluster <- new_cluster(n = 6)
+
+cluster_library(cluster, c("dplyr",
+                           "tidyverse",
+                           "infotheo"))
+
+cluster_copy(cluster, c("MI_file",
+                        "all_data_cluster",
+                        "rand_MI_data",
+                        "GOterms"))
+
+Sys.time()
+if(file.exists(MI_file)) {
+  all_data_cluster_MI <- 
+    readRDS(MI_file)
+} else {
+   
+   all_data_cluster_MI <-
+     all_data_cluster %>% 
+    group_by(dataset_id, resolution, seed) %>% 
+     partition(cluster) %>% 
+    do({
+      g_data <<- .
+      
+      g_GOterms <- 
+        GOterms %>% 
+        filter(ensg_id %in% g_data$gene)
+      
+      g_data %>%
+        ungroup() %>% 
+        left_join(g_GOterms,
+                  by = c("gene" = "ensg_id")) %>%
+        summarise(MI = mutinformation(cluster, GO_accession))  
+      }) %>% 
+     collect() %>% 
+    ungroup() %>%
+        left_join(rand_MI_data) %>% 
+       mutate(zscore = (MI - mean)/sd) 
+  
+  saveRDS(all_data_cluster_MI, 
+          MI_file)
+}
+Sys.time()
+
+
+
+all_data_cluster_MI %>%
+  ggplot(aes(resolution, zscore, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  facet_grid( ~ dataset_id, scales = "free_y") +
+  theme_bw() +
+  ggtitle("Mutual information")
+
+all_data_cluster_MI %>% 
+  left_join(all_data_cluster %>% 
+              group_by(dataset_id,resolution, seed) %>% 
+              mutate(k = max(cluster) + 1) %>% 
+              select(-gene,-cluster) %>% 
+              distinct) %>% 
+  ggplot(aes(resolution, zscore, color = as.factor(resolution))) +
+  geom_point() +
+  geom_smooth() +
+  facet_grid(~dataset_id, scales = "free_y") +
+  theme_bw() +
+  ggtitle("Connectivity and Silhouette index")
 ```
 
+## Summarize evaluation
+
+```{r}
+
+# Metrics ~ resolution
+ARI_res_2 %>% 
+  mutate(seed = NA) %>% 
+  rename(ARI = value) %>% 
+  gather(metric, value, ARI) %>% 
+  full_join(all_data_cluster_connectivity %>% 
+              left_join(all_data_cluster_MI %>%  select(-MI, -mean, -sd)) %>%
+              gather(metric, value, connectivity, avg_silhouette_width, zscore)) %>% 
+  ggplot(aes(resolution, value, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+ # scale_x_log10() +
+  facet_grid(metric ~ dataset_id, scales = "free_y") +
+  theme_bw() +
+  ggtitle("Clustering evaluation")
+
+
+# Metrics ~ k
+ARI_res_2 %>% 
+  mutate(seed = NA) %>% 
+  rename(ARI = value) %>% 
+  gather(metric, value, ARI) %>% 
+  full_join(all_data_cluster_connectivity %>% 
+              left_join(all_data_cluster_MI %>%  select(-MI, -mean, -sd)) %>%
+              gather(metric, value, connectivity, avg_silhouette_width, zscore)) %>% 
+    left_join(all_data_cluster %>% 
+              group_by(dataset_id,resolution, seed) %>% 
+              mutate(k = max(cluster) + 1) %>% 
+              select(-gene,-cluster) %>% 
+              distinct) %>% 
+  ggplot(aes(k, value, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +  facet_grid(metric ~ dataset_id, scales = "free_y") +
+  theme_bw() +
+  ggtitle("Clustering evaluation")
+
+ARI_res %>% 
+ # mutate(seed = c(1:10)) %>% 
+  rename(ARI = value) %>% 
+  left_join(all_data_cluster_connectivity) %>% 
+  left_join(all_data_cluster_MI %>%  select(-MI, -mean, -sd)) %>%
+  gather(metric, value, ARI, connectivity, avg_silhouette_width, zscore) %>% 
+  left_join(all_data_cluster %>% 
+              group_by(dataset_id,resolution, seed) %>% 
+              mutate(k = max(cluster) + 1) %>% 
+              select(-gene,-cluster) %>% 
+              distinct) %>% 
+  ggplot(aes(k, value, color = as.factor(resolution))) +  
+  geom_point() +
+  geom_smooth(inherit.aes = F, aes(k, value), color = "darkgrey") +
+  facet_grid(metric ~ dataset_id, scales = "free_y") +
+  theme_bw() +
+  ggtitle("Clustering evaluation")
+
+```
 
 
 # Choose a final clustering
@@ -787,22 +1132,44 @@ all_data_cluster_MI %>%
 ```{r}
 
 
-# This is just a placeholder. Later we will want to choose clustering based on performance
-final_cluster <-
-  all_data_cluster %>% 
-  filter(resolution == 1,
-         seed == 1) %>% 
-  arrange(cluster) %>% 
-  mutate(cluster = factor(cluster, unique(cluster))) %>% 
-  arrange(dataset_id, gene)
+# # This is just a placeholder. Later we will want to choose clustering based on performance
+# final_cluster <-
+#   all_data_cluster %>% 
+#   filter(resolution == 1,
+#          seed == 1) %>% 
+#   arrange(cluster) %>% 
+#   mutate(cluster = factor(cluster, unique(cluster))) %>% 
+#   arrange(dataset_id, gene)
 
 
+# Consensus clustering (clue package) - TEST (for 1 data set, 1 resolution)
+
+clusters <- all_data_cluster %>% 
+  filter(dataset_id == "blood", resolution == 4) %>% 
+  unite(resolution_seed, dataset_id, resolution, seed)  %>% 
+  group_split(resolution_seed) %>% 
+  map(to_cluster)
+
+partitions <- clusters %>%  map(~as.cl_partition(.x))
+
+cons_clustering <- cl_consensus(partitions, method = "SE")
+
+final_clustering <- cl_class_ids(cons_clustering)
+
+final_clustering_df <- data.frame(gene = names(final_clustering), 
+                                  cluster = as.numeric(final_clustering))
+
+
+cons_clustering$.Data[,] %>% 
+  as_tibble() %>% 
+  pheatmap()
+  
 
 
 ```
 
 
-#UMAP
+# UMAP
 
 ## Generate UMAP
 ```{r}
