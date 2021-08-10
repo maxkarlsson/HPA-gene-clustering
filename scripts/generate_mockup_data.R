@@ -29,12 +29,12 @@ dataset_metadata <-
   names() %>% 
   enframe("i", "dataset_id") %>% 
   mutate(dataset = gsub("_.*", "", dataset_id),
-         type = ifelse(dataset_id %in% c("tissue", "brain", "blood_consensus", "celline_consensus"),
-                       "region",
-                       "sample")) %>% 
+         type = case_when(dataset_id %in% c("tissue", "blood_consensus", "celline_consensus") ~ "region",
+                          dataset_id %in% c("brain") ~ "tissue",
+                       T ~ "sample")) %>% 
   select(-i)
 
-
+  
 singlecell_metadata <-
   vroom("data/meta/rna_single_cell_type_tissue.tsv") %>%
   select(tissue_name = Tissue, 
@@ -60,6 +60,7 @@ all_data_meta <-
             by = c("sample_id" = "id")) %>% 
   mutate(sample = case_when(dataset == "singlecell" ~ cell_type,
                             type == "sample" ~ sample, 
+                            type == "tissue" ~ sample_id, 
                             type == "region" ~ sample_id)) %>% 
   select(dataset_id, dataset, type, sample_id, sample)
 
