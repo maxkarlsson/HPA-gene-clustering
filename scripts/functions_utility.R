@@ -129,7 +129,7 @@ aggregate_data <-
 
 
 compile_example_data <- 
-  function() {
+  function(file_name) {
     
     brain_samples <- 
       meta_data %>% 
@@ -138,16 +138,22 @@ compile_example_data <-
     
     all_data <- 
       list(tissue = 
-             readRDS("../HPA-normalization2021/data/processed/aggregated_final_tissue_data2.rds")$consensus_data %>% 
-             select(ensg_id, tmm, consensus) %>% 
-             spread(consensus, tmm),
+             readRDS("../HPA-normalization2021/data/processed/aggregated_final_tissue_data2.rds")$tissue_data %>% 
+             select(ensg_id, tmm, region) %>% 
+             spread(region, tmm),
            brain = 
              vroom("../../Data/HPA/normalized/tissue_tmmnorm.tsv") %>% 
-             select(1, all_of(brain_samples$scilifelab_id)),
+             select(1, all_of(brain_samples$scilifelab_id)) %>% 
+             gather(scilifelab_id, tmm, -1) %>% 
+             left_join(brain_samples) %>% 
+             group_by(sample, ensg_id) %>% 
+             summarise(tmm = mean(tmm)) %>% 
+             select(ensg_id, tmm, sample) %>% 
+             spread(sample, tmm),
            blood = 
              vroom("../../Data/HPA/normalized/blood_tmmnorm.tsv"),
            blood_consensus = 
-             blood %>% 
+             vroom("../../Data/HPA/normalized/blood_tmmnorm.tsv") %>% 
              gather(scilifelab_id, tmm, -1) %>% 
              left_join(meta_data) %>% 
              group_by(sample, ensg_id) %>% 
@@ -156,6 +162,14 @@ compile_example_data <-
              spread(sample, tmm),
            celline = 
              vroom("../../Data/HPA/normalized/celline_tmmnorm.tsv"),
+           celline_consensus = 
+             vroom("../../Data/HPA/normalized/celline_tmmnorm.tsv") %>% 
+             gather(scilifelab_id, tmm, -1) %>% 
+             left_join(meta_data) %>% 
+             group_by(sample, ensg_id) %>% 
+             summarise(tmm = mean(tmm)) %>% 
+             select(ensg_id, tmm, sample) %>% 
+             spread(sample, tmm),
            singlecell = 
              {
                single_cell_data <- 
@@ -191,7 +205,7 @@ compile_example_data <-
              }
       )
     
-    saveRDS(all_data, "data/processed/all_cluster_data_mockup.rds")
+    saveRDS(all_data, paste0("data/processed/", file_name))
     
     return(all_data)
     
