@@ -99,37 +99,8 @@ panglao_db <-
                select(gene_name, ensg_id), 
              by = "gene_name") %>% 
   distinct()
-# GO_terms <- 
-#   read_tsv("data/meta/Ensembl103 GO terms.txt")
-# 
-# GO_terms_moderated <-
-#   GO_terms %>%
-#   select(ensg_id = 1, 
-#          gene_name = 2, 
-#          GO = 3, 
-#          GO_domain = 4, 
-#          term_name = 5) %>% 
-#   distinct() %>%
-#   filter(!is.na(GO)) %>% 
-#   filter(!is.na(GO_domain)) %>% 
-#   filter(ensg_id %in% clustering_data$gene) %>% 
-#   group_by(GO) %>% 
-#   mutate(n_genes = n_distinct(ensg_id)) %>% 
-#   ungroup() %>% 
-#   filter(n_genes >= 3 & n_genes < 1000)
-# 
-# GO_terms_moderated %>% 
-#   select(GO_domain, term_name, n_genes) %>% 
-#   distinct() %>%   
-#   arrange(n_genes)
-# 
-# GO_terms_moderated %>% 
-#   filter(!complete.cases(.))
-# 
-# GO_terms_dict <- 
-#   GO_terms_moderated %>% 
-#   select(GO, term_name) %>% 
-#   distinct()
+
+
 
 ```
 
@@ -654,6 +625,13 @@ cp_all_res %>%
   write_csv("results/Annotation reports/fischer test results/enrichment_results.csv")
   
 
+cp_all_res %>% 
+  group_by(dataset_id) %>% 
+  do({
+    g_data <<- .
+    write_csv(g_data, paste0("results/Annotation reports/fischer test results/enrichment_results ", unique(g_data$dataset_id), ".csv"))
+  })
+
 plot_data <- 
   cp_all_res %>% 
   filter(!grepl("original", test_type)) %>% 
@@ -711,6 +689,7 @@ plots
 dev.off()
 
 
+
 ```
 
 # Generate treemaps 
@@ -751,7 +730,7 @@ plot_legend <-
 
 ggpubr::get_legend(plot_legend) %>% 
   ggpubr::as_ggplot()
-ggsave("results/Ontology legend.pdf",
+ggsave("results/Ontology legend.svg",
        width = 1, height = 1)
 
 
@@ -837,6 +816,17 @@ plots <-
                              plot_settings$cluster[i]))
            })
 
+
+for(i in plot_settings$i) {
+  setting <- 
+    plot_settings[i, ]
+  ggsave(paste0("results/Annotation reports/svg/treemap/GO treemap ", 
+                setting$dataset_id, " ",
+                setting$cluster,
+                ".svg"),
+         plots[[i]],
+         width = 6, height = 4)
+}
 
 pdf("results/GO treemaps.pdf")
 plots

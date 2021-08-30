@@ -1,6 +1,10 @@
 \doc
 \data
 \results
+scripts/file structure test.R
+scripts/IHC investigation.R
+scripts/MI_testing.R
+scripts/treemap_testing.R
 treemap.RData
 .Rproj.user
 .Rhistory
