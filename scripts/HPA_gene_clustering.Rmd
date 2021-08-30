@@ -176,7 +176,7 @@ dataset_palette <- c("tissue" = "#0083C4", "singlecell" = "#6AA692", "brain" = "
 # This run ID is used to check whether the run is already performed. 
 # In that case files will be reloaded instead of rerunning calculations.
 run_id <- 
-  "new_aggregation"
+  "new_aggregation_100seeds"
 run_file <- 
   paste0("data/processed/clusters_", run_id, ".rds")
 
@@ -249,7 +249,7 @@ if(file.exists(run_file)) {
                             scaling = "zscore",
                             distance_metric = "spearman",
                             clustering_method = "louvain",
-                            seed = 1:10,
+                            seed = 1:100,
                             resolution = seq.int(1, 8, by = 0.5),
                             npcs = 100,
                             log_transform = F,
@@ -265,7 +265,6 @@ if(file.exists(run_file)) {
   saveRDS(all_data_cluster, 
           run_file)
 }
-
 
 pal<-
   colorRampPalette(ggthemes::tableau_color_pal(palette = "Classic Cyclic")(13))(n_distinct(all_data_cluster$cluster))
@@ -1457,6 +1456,63 @@ umaps_scaled_clusterings <-
   umaps_scaled %>% 
   left_join(all_consensus %>% 
   filter(dataset_id %in% c("blood", "brain", "singlecell", "tissue", "celline_consensus")))
+
+umap_dist <- 
+  umaps_scaled_clusterings %>% 
+  group_by(dataset_id,resolution,cluster) %>% 
+  do({
+    dat <<- .
+    
+    dat %>% 
+      select(gene,UMAP_1,UMAP_2) %>%
+      column_to_rownames("gene") %>% 
+      dist() %>%
+      as.matrix() %>% 
+      as_tibble(rownames = "gene1") %>% 
+      gather(gene2,dist,-1) %>% 
+      filter(gene1 < gene2) %>% 
+      summarise(dist = mean(dist), 
+                n_genes = n_distinct(dat$gene))
+  })
+
+
+
+
+plot_data <- 
+  umap_dist %>% 
+  group_by(dataset_id,resolution) %>% 
+  mutate(total_genes = sum(n_genes)) %>% 
+  ungroup() %>% 
+  mutate(weighted_dist = dist * n_genes / total_genes)
+  
+plot_data %>% 
+  group_by(dataset_id,resolution) %>% 
+  summarise(mean_dist = mean(dist, na.rm = T), 
+            max_dist = max(dist, na.rm = T),
+            intracluster_dist = sum(weighted_dist, na.rm = T)) %>% 
+  gather(metric, value, mean_dist, max_dist, intracluster_dist) %>% 
+  ggplot(aes(x = resolution, y = value)) +
+  geom_point() +
+  geom_smooth() +
+  facet_grid(metric ~ dataset_id, scale = "free_y")
+
+plot_data %>% 
+  group_by(dataset_id,resolution) %>% 
+  summarise(mean_dist = mean(dist, na.rm = T), 
+            max_dist = max(dist, na.rm = T),
+            intracluster_dist = sum(weighted_dist, na.rm = T)) %>% 
+  ggplot(aes(mean_dist, intracluster_dist, color = dataset_id)) +
+  geom_point() +
+  geom_abline() +
+  coord_fixed()
+
+# plot_data %>% 
+#   ggplot(aes(dist, weighted_dist)) + 
+#   geom_point() +
+#   facet_wrap(~dataset_id)
+
+################
+
 
 res_consensus_2 <- 
   umaps_scaled_clusterings %>% 
