@@ -215,6 +215,39 @@ HPA_gene_clustering <-
       saveRDS(pca_data, savefile_pca)
     }
     
+    ncomp <- # Kaiser's rule: retain factors whose eigenvalues are greater than 1 (they explain at least as much variance as one sample in the original dataset)
+      pca_data$sdev[(pca_data$sdev)^2 >= 1] %>% # under some assumptions, variance = eigenvalues
+      tail(1) %>%  
+      enframe () %$% 
+      name 
+    ncomp <- as.numeric(gsub("PC", "", ncomp))
+    
+    if (pca_data$stats[ncomp, ]$R2cum < 0.8) {
+      ncomp <- pca_data$stats %>% 
+        filter(R2cum > 0.8) %>% 
+        pull(PC) %>% 
+        head(1)
+    }
+
+    pca_data$stats %>%
+      ggplot(aes(PC,R2cum)) +
+      geom_point() +
+      geom_line() +
+      theme_bw() +
+      theme_bw() +
+      geom_vline(xintercept = ncomp, linetype = "dashed") +
+      annotate("text",
+               x = ncomp,
+               y = 0.55,
+               label = paste0("PC ", ncomp,
+                              "\nR2 = ", round(pca_data$stats[ncomp, ]$R2cum, 3)),
+               hjust = 1,
+               vjust = 0) +
+      ggtitle(run_id)
+
+    ggsave(paste0("results/PCA_plot_",run_id,".pdf"))
+
+
     if(file.exists(savefile_dist)) {
       distance_data <- read_rds(savefile_dist)
     } else {
@@ -224,6 +257,8 @@ HPA_gene_clustering <-
       # Calculate distance
       distance_data <- 
         pca_data$scores %>%
+        as.data.frame() %>% 
+        select(1:ncomp) %>% # Select the number of components determined with the Kaiser rule
         calculate_distance(distance_metric = distance_metric) %>%
         as.matrix() %>%
         set_colnames(genes) %>%
