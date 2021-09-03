@@ -154,6 +154,150 @@ HPA_gene_clustering <-
            col_value,
            col_gene, 
            col_sample, 
+           savefile_pca,
+           savefile_pca_plot,
+           savefile_dist,
+           savefile_neighbors,
+           scaling = "zscore",
+           distance_metric = "pearson",
+           clustering_method = "louvain",
+           npcs = 30,
+           log_transform = F, 
+           k = 10, 
+           resolution = 1,
+           seed = 42) {
+    
+    
+    if(file.exists(savefile_pca)) {
+      pca_data <- read_rds(savefile_pca)  
+    } else {
+      # Scale data
+      scaled_data <- 
+        scale_data(df = data, 
+                   col_value = col_value,
+                   col_gene = col_gene, 
+                   col_sample = col_sample,
+                   log_transform = log_transform, 
+                   scaling = scaling)
+      
+      # Perform dimensionality reduction using pca
+      pca_data <- 
+        scaled_data %>%
+        spread(col_sample, exp) %>% 
+        column_to_rownames(col_gene) %>%
+        calculate_pca(npcs = npcs)
+      
+      
+      saveRDS(pca_data, savefile_pca)
+    }
+    
+    ncomp <- # Kaiser's rule: retain factors whose eigenvalues are greater than 1 (they explain at least as much variance as one sample in the original dataset)
+      pca_data$sdev[(pca_data$sdev)^2 >= 1] %>% # under some assumptions, variance = eigenvalues
+      tail(1) %>%  
+      enframe () %$% 
+      name 
+    ncomp <- as.numeric(gsub("PC", "", ncomp))
+    
+    if (pca_data$stats[ncomp, ]$R2cum < 0.8) {
+      ncomp <- pca_data$stats %>% 
+        filter(R2cum > 0.8) %>% 
+        pull(PC) %>% 
+        head(1)
+    }
+
+    plot <- 
+      pca_data$stats %>%
+      ggplot(aes(PC,R2cum)) +
+      geom_point() +
+      geom_line() +
+      theme_bw() +
+      theme_bw() +
+      geom_vline(xintercept = ncomp, linetype = "dashed") +
+      annotate("text",
+               x = ncomp,
+               y = 0.55,
+               label = paste0("PC ", ncomp,
+                              "\nR2 = ", round(pca_data$stats[ncomp, ]$R2cum, 3)),
+               hjust = 1,
+               vjust = 0)
+    
+    ggsave(savefile_pca_plot, plot = plot, width = 5, height = 5)
+    
+    
+    if(file.exists(savefile_dist)) {
+      distance_data <- read_rds(savefile_dist)
+    } else {
+      
+      
+      genes <- rownames(pca_data$scores)
+      # Calculate distance
+      distance_data <- 
+        pca_data$scores %>%
+        as.data.frame() %>% 
+        select(1:ncomp) %>% # Select the number of components determined with the Kaiser rule
+        calculate_distance(distance_metric = distance_metric) %>%
+        as.matrix() %>%
+        set_colnames(genes) %>%
+        set_rownames(genes)%>%
+        as.dist()
+      
+      saveRDS(distance_data, savefile_dist)
+      
+    }
+    
+    
+    if(file.exists(savefile_neighbors)) {
+      neighbors <- read_rds(savefile_neighbors)
+    } else {
+      
+      # Calculate neighbor graph
+      neighbors <-
+        FindNeighbors(
+          distance_data,
+          k.param = 20,
+          compute.SNN = TRUE,
+          prune.SNN = 1/15,
+          nn.method = "annoy", #Distance metric for annoy. Options include: euclidean, cosine, manhattan, and hamming
+          annoy.metric = "euclidean",
+          nn.eps = 0,
+          verbose = TRUE,
+          force.recalc = FALSE
+        )
+      
+      saveRDS(neighbors, savefile_neighbors)
+    }
+    
+    
+    # Cluster genes
+    genes <- rownames(neighbors$nn)
+    
+    cluster_data <-
+      tidyr::crossing(resolution = resolution,
+                      seed = seed) %>% 
+      group_by_all() %>% 
+      do({
+        cluster_genes(genes,
+                      neighbors,
+                      clustering_method = clustering_method,
+                      resolution = .$resolution,
+                      seed = .$seed)
+      }) %>% 
+      ungroup()
+    
+      
+    
+    
+    list(pca_data = pca_data,
+         neighbors = neighbors,
+         cluster_data = cluster_data)
+  }
+
+
+HPA_gene_clustering_old <- 
+  function(data, 
+           col_value,
+           col_gene, 
+           col_sample, 
            scaling = "zscore",
            distance_metric = "pearson",
            clustering_method = "louvain",
@@ -228,7 +372,7 @@ HPA_gene_clustering <-
         pull(PC) %>% 
         head(1)
     }
-
+    
     pca_data$stats %>%
       ggplot(aes(PC,R2cum)) +
       geom_point() +
@@ -244,10 +388,10 @@ HPA_gene_clustering <-
                hjust = 1,
                vjust = 0) +
       ggtitle(run_id)
-
+    
     ggsave(paste0("results/PCA_plot_",run_id,".pdf"))
-
-
+    
+    
     if(file.exists(savefile_dist)) {
       distance_data <- read_rds(savefile_dist)
     } else {
@@ -308,7 +452,7 @@ HPA_gene_clustering <-
       }) %>% 
       ungroup()
     
-      
+    
     
     
     list(pca_data = pca_data,
@@ -316,5 +460,71 @@ HPA_gene_clustering <-
          cluster_data = cluster_data)
   }
 
+to_cluster <- function(cluster_df) {
+  v <- cluster_df$cluster
+  names(v) <- cluster_df$gene
+  return(v)
+}
+
+df_to_vector <- function(cluster_df) {
+  v <- cluster_df$cluster
+  names(v) <- cluster_df$gene
+  return(v)
+}
 
 
+find_consensus <- function(all_clusterings, id, get_membership = F, runs = 1) {
+  
+  # Use the median cluster size as the consensus cluster size
+  k <- 
+    all_clusterings %>% 
+    select(id = id, 
+           cluster) %>% 
+    group_by(id) %>% 
+    summarise(n = n_distinct(cluster)) %>% 
+    pull(n) %>% 
+    median() %>% 
+    ceiling()
+  
+  # Format clusters and calculate consensus (clue)
+  clusters <- 
+    all_clusterings %>% 
+    select(id = id, 
+           gene,
+           cluster) %>% 
+    group_split(id) %>% 
+    map(to_cluster) %>%  
+    map(~as.cl_partition(.x))
+  
+  set.seed(1)
+  cons_clustering <- cl_consensus(clusters, 
+                                  method = "SE", 
+                                  control = list(k = k, 
+                                                 nruns = runs, 
+                                                 verbose = FALSE)) 
+  
+  final_clustering <- data.frame(gene = names(cl_class_ids(cons_clustering)), 
+                                 cluster_cons = as.numeric(cl_class_ids(cons_clustering)),
+                                 cluster = unclass(factor(as.numeric(cl_class_ids(cons_clustering)))))
+  
+  
+  # ungroup() %>% 
+  #   group_by(dataset_id,resolution) %>% 
+  #   mutate(cluster = unclass(factor(cluster))
+           
+           
+  if (get_membership) {
+    # Extract cluster membership matrix 
+    cons_matrix <- 
+      cons_clustering$.Data[,] %>% 
+      as_tibble(rownames = "gene") %>% 
+      gather(cluster, membership, -1) %>% 
+      filter(membership > 0) %>% 
+      mutate(cluster = gsub("V", "", cluster))
+    
+    return(list(consensus_clustering = final_clustering, 
+                membership_matrix = cons_matrix ))
+  } else {
+    return(final_clustering)
+  }
+}
