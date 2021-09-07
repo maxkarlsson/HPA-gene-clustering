@@ -1,10 +1,12 @@
 \doc
 \data
 \results
+\annotation_databases
 scripts/file structure test.R
 scripts/IHC investigation.R
 scripts/MI_testing.R
 scripts/treemap_testing.R
+scripts/predict_resolution_range_test.R
 treemap.RData
 .Rproj.user
 .Rhistory
