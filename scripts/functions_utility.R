@@ -395,3 +395,19 @@ create_folder_structure <-
       })
     return(out_paths)
   }
+
+spread_colors <- 
+  function(color, n, colorrange = 0.5) {
+    
+    if(n == 1) {
+      return(color)
+    } else {
+      colorRamp(c("white", color, "black"))(seq(0.5 - colorrange / 2,
+                                                0.5 + colorrange / 2, 
+                                                length.out = n)) %>% 
+        as_tibble() %$% 
+        rgb(V1, V2, V3, maxColorValue = 255) 
+      
+    }
+    
+  }

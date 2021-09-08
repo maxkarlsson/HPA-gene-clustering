@@ -7,12 +7,23 @@ editor_options:
   chunk_output_type: console
 ---
 
+# Run Checklist
+
+## 1. Make sure the dataset metadata is the correct file
+
+## 2. Check that gene dictionaries and databases are the right version
+
+##---
+##---
+
 # Setup
 
+## Load libraries
 ```{r setup, include=FALSE}
 
 library(tidyverse)
 library(tidytext)
+library(multidplyr)
 library(vroom)
 library(magrittr)
 library(broom)
@@ -21,6 +32,7 @@ library(rrvgo)
 library(treemapify)
 library(pbapply)
 library(clusterProfiler)
+library(patchwork)
 source("scripts/functions_utility.R")
 source("scripts/generate_gene_clusters.R")
 
@@ -28,57 +40,47 @@ select <- dplyr::select
 slice <- dplyr::slice
 rename <- dplyr::rename
 simplify <- clusterProfiler::simplify
-# clustering_data <- 
-#   readRDS("data/processed/data_clusters.rds")
-
-# clustering_data <-
-#   readRDS("data/processed/clusters_to_annotate.rds") %>% 
-#   ungroup()
-
-clustering_data <-
-  read_csv("data/processed/clusterings_to_annotate.csv")
 
 
 
 
+```
 
-subcell_class <-
-  read_tsv("data/meta/subcellular_location_HPA20.tsv") %>% 
-  filter(Gene %in% clustering_data$gene) %>% 
-  select(ensg_id = Gene, 
-         Enhanced, 
-         Supported, 
-         Approved) %>% 
-  gather(reliability, location, -1) %>% 
-    filter(!is.na(location)) %>% 
-    separate_rows(location, sep = ";")
-  
-protein_class <-
-  vroom("data/meta/proteinatlas20.tsv") %>% 
-  select(ensg_id = Ensembl,
-         protein_class = `Protein class`) %>% 
-  separate_rows(protein_class, sep = ", ") 
+## File structure
+```{r}
 
-spec_class <-
-  vroom("data/meta/proteinatlas20.tsv") %>% 
-  select(ensg_id = Ensembl,
-         tissue = `RNA tissue specific NX`,
-         singlecell = `RNA single cell type specific NX`,
-         brain = `RNA brain regional specific NX`,
-         blood = `RNA blood cell specific NX`) %>% 
-  gather(type, elevated, -1) %>% 
-  separate_rows(elevated, sep = ";") %>% 
-  mutate(elevated = gsub(":.*", "", elevated)) %>% 
-  filter(!is.na(elevated)) %>% 
-  filter(ensg_id %in% clustering_data$gene) 
+dataset_metadata <- read_csv("run_settings/20210901_settings.csv")
+
+file_structure <-
+  create_folder_structure(dataset_id = dataset_metadata$dataset_id,
+                          dataset_run_id = dataset_metadata$version,
+                          main_folder = "results/Clustering results",
+                          folders = c("data" = "data", 
+                                      "svg" = "svg",
+                                      "treemap" = "svg/treemap",
+                                      "heatmap" = "svg/heatmap",
+                                      "enrichment" = "enrichment",
+                                      "clustering" = "clustering"))
+```
 
 
-secr_class <- 
-  vroom("data/meta/proteinatlas20.tsv") %>% 
-  select(ensg_id = Ensembl,
-         secretome_location = `Secretome location`) %>% 
-  filter(!is.na(secretome_location))
-# spec_class <- read_tsv("data/meta/consensus_all_category_92.tsv")
+## Load clustering data
+
+```{r}
+
+clustering_data <- 
+  file_structure %>% 
+  map(function(x) x$clustering) %>% 
+  map(function(x) read_csv(paste(x, "final_consensus.csv", sep = "/"))) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  mutate(cluster = as.character(cluster))
+
+
+```
+
+## Load gene mapping
+
+```{r}
 entrez_dict <- 
   read_tsv("data/meta/ensembl103_entrez.txt") %>% 
   select(ensg_id = 1, 
@@ -88,25 +90,869 @@ entrez_dict <-
 gene_info <- 
   read_tsv("data/meta/geninfo_92.tsv")
 
-panglao_db <-
-  read_tsv("data/meta/PanglaoDB_markers_27_Mar_2020.tsv") %>% 
-  filter(grepl("Hs", species), 
-         `gene type` %in% c("protein-coding gene",
-                            "protein coding gene")) %>% 
-    select(gene_name = 2, 
-           cell_type = 3) %>% 
-  inner_join(gene_info %>% 
-               select(gene_name, ensg_id), 
-             by = "gene_name") %>% 
-  distinct()
+```
+
+
+## Load databases
+
+```{r}
+
+enrichment_settings <- 
+  read_csv("run_settings/20210907_enrichment_settings.csv")
+
+
+enrichment_settings_versions <- 
+  enrichment_settings %>% 
+  mutate(version = case_when(is.na(version) & 
+                               grepl("^GO", id) ~ paste("org.Hs.eg.db",
+                                                        packageVersion("org.Hs.eg.db")),
+                             is.na(version) & 
+                               id == "KEGG" ~ gsub("-", "", Sys.Date()),
+                             !is.na(version) ~ version))
+
+database_formatting_functions <- 
+  list(secretome_location = . %>% 
+         select(ensg_id = Ensembl,
+                term = `Secretome location`) %>% 
+         filter(!is.na(term)) %>% 
+         mutate(term_id = term),
+       
+       specificity_blood = . %>% 
+         select(ensg_id = Ensembl,
+                term = `RNA blood cell specific NX`) %>% 
+         separate_rows(term, sep = ";") %>% 
+         mutate(term = gsub(":.*", "", term)) %>% 
+         filter(!is.na(term)) %>% 
+         filter(ensg_id %in% clustering_data$gene) %>% 
+         mutate(term_id = term),
+       
+       specificity_brain = . %>% 
+         select(ensg_id = Ensembl,
+                term = `RNA brain regional specific NX`) %>% 
+         separate_rows(term, sep = ";") %>% 
+         mutate(term = gsub(":.*", "", term)) %>% 
+         filter(!is.na(term)) %>% 
+         filter(ensg_id %in% clustering_data$gene) %>% 
+         mutate(term_id = term),
+       
+       specificity_singlecell = . %>% 
+         select(ensg_id = Ensembl,
+                term = `RNA single cell type specific NX`) %>% 
+         separate_rows(term, sep = ";") %>% 
+         mutate(term = gsub(":.*", "", term)) %>% 
+         filter(!is.na(term)) %>% 
+         filter(ensg_id %in% clustering_data$gene) %>% 
+         mutate(term_id = term),
+       
+       specificity_tissue = . %>% 
+         select(ensg_id = Ensembl,
+                term = `RNA tissue specific NX`) %>% 
+         separate_rows(term, sep = ";") %>% 
+         mutate(term = gsub(":.*", "", term)) %>% 
+         filter(!is.na(term)) %>% 
+         filter(ensg_id %in% clustering_data$gene) %>% 
+         mutate(term_id = term),
+       
+       subcellular_location = . %>% 
+         filter(Gene %in% clustering_data$gene) %>% 
+         select(ensg_id = Gene, 
+                Enhanced, 
+                Supported, 
+                Approved) %>% 
+         gather(reliability, location, -1) %>% 
+         filter(!is.na(location)) %>% 
+         separate_rows(location, sep = ";") %>% 
+         select(ensg_id, term = location) %>% 
+         mutate(term_id = term),
+       
+       panglao_cellmarkers = . %>% 
+         filter(grepl("Hs", species), 
+                `gene type` %in% c("protein-coding gene",
+                                   "protein coding gene")) %>% 
+         select(gene_name = 2, 
+                term = 3) %>% 
+         distinct() %>% 
+         mutate(term_id = term),
+       
+       protein_class = . %>% select(ensg_id = Ensembl,
+                                    protein_class = `Protein class`) %>% 
+         separate_rows(protein_class, sep = ", ") %>% 
+         rename(term = protein_class) %>% 
+         mutate(term_id = term),
+       
+       reactome = . %>% 
+         filter(species == "Homo sapiens") %>% 
+         select(ensg_id, term = description, term_id = id) %>% 
+         distinct() %>% 
+         filter(ensg_id %in% clustering_data$gene), 
+       
+       trrust = . %>% 
+         select(gene_name, term) %>% 
+         mutate(term_id = term))
+
+
+
+gene_formatting_functions <- 
+  list(`gene names` = . %>% 
+         left_join(gene_info %>% 
+                     select(ensg_id, gene_name),
+                   by = c("gene_name")) %>% 
+         select(ensg_id, term, term_id))
+  
+
+
+
+
+database_terms <- 
+  enrichment_settings %>% 
+  filter(!is.na(file)) %>% 
+  group_by(id) %>% 
+  do({
+    g_data <<- .
+    
+    raw_db <- 
+      read_tsv(paste0("annotation_databases/", g_data$file))
+    
+    db_format_function <- 
+      database_formatting_functions[[g_data$id]]
+    
+    out_db <- 
+      raw_db %>% 
+      db_format_function()
+    
+    if(g_data$gene_format != "ensembl") {
+      gene_format_function <- gene_formatting_functions[[g_data$gene_format]]
+      
+      out_db <- 
+        out_db %>%
+        gene_format_function()
+        
+    }
+    
+    stopifnot(names(out_db) == c("ensg_id", "term", "term_id")) 
+    
+    out_db
+    
+  }) %>% 
+  ungroup()
 
 
 
 ```
 
 
-# Functions
+#Enrichment analyses
 
+
+##GO
+
+```{r}
+
+
+
+worker_cluster <- new_cluster(n = 5)
+cluster_library(worker_cluster, c("dplyr",
+                                  "tidyverse"))
+cluster_copy(worker_cluster, c("compareCluster", 
+                               "simplify", 
+                               "min"))
+
+cluster_membership <-
+  clustering_data %>% 
+  expand_grid(ontology = c("BP", "CC", "MF")) 
+
+GO_enrichment_res <- 
+  cluster_membership %>% 
+  group_by(ontology) %>% 
+  do({
+    ontology_data <<- .
+    
+    ontology <- unique(ontology_data$ontology)
+    cluster_copy(worker_cluster, c("ontology"))
+    
+    ontology_data %>% 
+      group_by(dataset_id) %>% 
+      partition(worker_cluster) %>% 
+      do({
+        dataset_data <- .
+        dataset_res <- 
+          compareCluster(gene ~ cluster,
+                         fun = "enrichGO",
+                         data = dataset_data,
+                         keyType = "ENSEMBL",
+                         OrgDb = "org.Hs.eg.db",
+                         minGSSize = 10,
+                         maxGSSize = 500,
+                         universe = unique(dataset_data$gene),
+                         ont = ontology) 
+        
+        bind_rows(simplified = dataset_res %>% 
+                    simplify(cutoff = 0.7, by = "p.adjust", select_fun = min) %>% 
+                    as_tibble(),
+                  original = dataset_res %>% 
+                    as_tibble(),
+                  .id = "simplified")
+      }) %>% 
+      ungroup() %>% 
+      collect()
+      
+    
+    
+  }) %>% 
+  ungroup()
+
+
+rm(worker_cluster)
+
+
+
+
+```
+
+
+##KEGG
+
+```{r}
+
+worker_cluster <- new_cluster(n = 5)
+cluster_library(worker_cluster, c("dplyr",
+                                  "tidyverse"))
+cluster_copy(worker_cluster, c("compareCluster"))
+
+clustering_data_entrez <- 
+  clustering_data %>%
+  left_join(entrez_dict,
+            by = c("gene" = "ensg_id")) 
+
+KEGG_enrichment_res <- 
+  clustering_data_entrez %>% 
+  
+  group_by(dataset_id) %>% 
+  partition(worker_cluster) %>% 
+  do({
+    dataset_data <- .
+    compareCluster(entrez ~ cluster,
+                   fun = "enrichKEGG",
+                   data = dataset_data,
+                   universe = unique(dataset_data$entrez)) %>% 
+      as_tibble()
+  }) %>% 
+  ungroup() %>% 
+  collect()
+      
+    
+
+
+rm(worker_cluster)
+
+
+```
+
+## Other databases
+
+```{r}
+
+worker_cluster <- new_cluster(n = 5)
+cluster_library(worker_cluster, c("dplyr",
+                           "tidyverse"))
+cluster_copy(worker_cluster, c("enricher"))
+
+database_enrichment_res <- 
+  database_terms %>% 
+  group_by(id) %>% 
+  do({
+    # For each database
+    database <<- .
+    
+    term2gene <- 
+      database %>% 
+      select(term, ensg_id)
+    
+    cluster_copy(worker_cluster, c("term2gene"))
+    
+    # For 
+    clustering_data %>% 
+      group_by(dataset_id) %>% 
+      partition(worker_cluster) %>% 
+      do({
+        g_clustering_data <<- .
+        
+        g_clustering_data %>% 
+          group_by(cluster) %>% 
+          
+          do({
+            g_data <- .
+            
+            pull(g_data, gene) %>% 
+              enricher(maxGSSize = Inf, 
+                       universe = unique(g_clustering_data$gene),
+                       TERM2GENE = term2gene) %>% 
+              as_tibble()
+          }) %>% 
+          ungroup()
+        
+      }) %>% 
+      ungroup() %>% 
+      collect()
+    
+  }) %>% 
+  ungroup()
+  
+rm(worker_cluster)
+
+```
+
+
+##Save results
+
+```{r}
+
+
+all_res <-
+  list(GO_enrichment_res %>% 
+         mutate(test_type = paste0("GO_", ontology, "_", simplified)) %>% 
+         select(-ontology, -Cluster, -simplified),
+       KEGG_enrichment_res %>% 
+         mutate(test_type = "KEGG") %>% 
+         select(-Cluster),
+       database_enrichment_res %>% 
+         rename(test_type = id)) %>% 
+    bind_rows() %>% 
+  mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
+           as.numeric(gsub(".*\\/", "", GeneRatio)),
+         BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
+           as.numeric(gsub(".*\\/", "", BgRatio)),
+         odds_ratio = GeneFrac / BgFrac)   %>% 
+  left_join(enrichment_settings_versions %>% 
+              select(test_type = id,
+                     test_description = description, 
+                     database_version = version)) %>% 
+
+  select(dataset_id, test_type, test_description, database_version, 
+         cluster, ID, Description,
+         GeneRatio, GeneFrac, BgRatio, BgFrac, odds_ratio, everything()) 
+
+
+
+
+all_res %>% 
+  group_by(dataset_id) %>% 
+  do({
+    g_data <<- .
+    
+    enrichment_savefile <- 
+      paste(file_structure[[unique(g_data$dataset_id)]]$enrichment,
+            "enrichment_results.tsv",
+            sep = "/")
+    
+    write_tsv(g_data,
+              enrichment_savefile)
+    
+  })
+
+
+
+
+
+
+```
+
+# Generate plots
+
+## Treemaps 
+
+```{r}
+
+ontology_pal <- 
+  c("MF" = "#FF6F00",
+    "CC" = "#C71B00",
+    "BP" = "#018EA0")
+
+# Generate similarity matrix for all significant GO terms:
+GO_sim <-
+  pblapply(c("BP" = "GO_BP_original",
+             "CC" = "GO_CC_original", 
+             "MF" = "GO_MF_original"),
+           function(ont_) {
+             GO_terms <-
+               all_res %>% 
+               filter(test_type == ont_) %>% 
+               pull(ID) %>% 
+               unique()
+             
+             calculateSimMatrix(GO_terms, 
+                                orgdb = "org.Hs.eg.db",
+                                ont = str_extract(ont_, "BP|CC|MF"),
+                                method = "Wang")
+           })
+
+
+# Generate plot legend: 
+
+
+plot_legend <-
+  enframe(ontology_pal,
+          "Ontology", 
+          "Color") %>% 
+  ggplot(aes(1, 1, fill = Ontology)) +
+  geom_tile() +
+  scale_fill_manual(values = ontology_pal)
+plot_legend <- 
+  ggpubr::get_legend(plot_legend) %>% 
+  ggpubr::as_ggplot()
+
+file_structure %>% 
+  map(function(x) x$treemap) %>% 
+  lapply(function(treemap_path) {
+    ggsave(paste(treemap_path, "treemap legend.svg",
+                 sep = "/"),
+           plot = plot_legend,
+       width = 1, height = 1)
+  })
+  
+# Generate plot data for treemaps
+
+
+worker_cluster <- new_cluster(n = 6)
+cluster_library(worker_cluster, c("dplyr",
+                                  "tidyverse"))
+cluster_copy(worker_cluster, c("GO_sim", 
+                               "reduceSimMatrix"))
+
+plot_data <- 
+  all_res %>%
+  filter(test_type %in% c("GO_BP_original",
+                          "GO_CC_original", 
+                          "GO_MF_original")) %>% 
+  mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
+           as.numeric(gsub(".*\\/", "", GeneRatio)),
+         ontology = str_extract(test_type, "BP|CC|MF")) %>% 
+  group_by(ontology, test_type, dataset_id, cluster) %>% 
+  filter(n_distinct(ID) >= 2) %>% 
+  group_by(ontology, test_type, dataset_id, cluster) %>% 
+  partition(worker_cluster) %>% 
+  do({
+    g_data <<- .
+    
+    sim_mat <- 
+      GO_sim[[unique(g_data$ontology)]][g_data$ID,
+                                        g_data$ID]
+    
+    sim_mat %>%
+      reduceSimMatrix(setNames(-log10(g_data$p.adjust), g_data$ID),
+                      threshold=0.7,
+                      orgdb="org.Hs.eg.db") %>%
+      as_tibble() %>%
+      rename(term_cluster = cluster)
+    
+    
+  }) %>% 
+  
+  ungroup() %>% 
+  collect()
+
+rm(worker_cluster)
+
+plot_data %>% 
+  group_by(dataset_id, cluster) %>% 
+  do({
+    g_data <<- .
+    
+    treemap_savefile <- 
+      paste0(file_structure[[unique(g_data$dataset_id)]]$treemap,
+             "/",
+             "treemap ", 
+             unique(g_data$cluster),
+             ".svg")
+    
+    
+    
+  })
+
+
+plot_settings <-
+  plot_data %>% 
+  select(dataset_id, cluster) %>% 
+  arrange(dataset_id, as.numeric(cluster)) %>% 
+  distinct() %>% 
+  mutate(i = row_number(), 
+         treemap_folder = file_structure[dataset_id] %>% 
+           map(function(x) x$treemap) %>% 
+           unlist(),
+         treemap_savefile = paste0(treemap_folder,
+                                   "/",
+                                   "treemap ", 
+                                   unique(cluster),
+                                   ".svg"))
+
+plots <- 
+  pblapply(plot_settings$i,
+           function(i) {
+             plot_data %>% 
+               filter(dataset_id == plot_settings$dataset_id[i],
+                      cluster == plot_settings$cluster[i]) %>% 
+               left_join(enframe(ontology_pal,
+                                 "ontology", 
+                                 "color"),
+                         by = "ontology") %>% 
+               group_by(parent) %>% 
+               mutate(nn = n_distinct(go),
+                      color2 = spread_colors(unique(color), n_distinct(go), colorrange = 0.2)) %>% 
+               ggplot(aes(area = score, subgroup = parentTerm)) +
+               
+               geom_treemap(aes(fill = color2), 
+                            color = "black",
+                            show.legend = T) +
+               geom_treemap_subgroup_border(color = "black") +
+               
+               geom_treemap_text(aes(label = term),
+                                 colour = "black", 
+                                 place = "centre",
+                                 alpha = 0.4,
+                                 grow = TRUE) +
+               
+               geom_treemap_subgroup_text(place = "centre", 
+                                          grow = T, 
+                                          reflow = T,
+                                          alpha = 1, 
+                                          colour = "white", 
+                                          fontface = "bold",
+                                          min.size = 0) +
+               
+               scale_fill_identity() +
+               theme_void() 
+               # ggtitle(paste(plot_settings$dataset_id[i],
+               #               "cluster",
+               #               plot_settings$cluster[i]))
+           })
+
+
+for(i in plot_settings$i) {
+  setting <- 
+    plot_settings[i, ]
+  ggsave(setting$treemap_savefile,
+         plots[[i]],
+         width = 6, height = 4)
+}
+
+
+
+```
+
+## Heatmaps
+
+```{r}
+cluster_membconf_data <- 
+  clustering_data %>% 
+  # filter(dataset_id == "tissue") %>% 
+  select(dataset_id, ensg_id = gene, cluster) %>% 
+  mutate(cluster_membership_confidence = rnorm(nrow(.), 0.95, 0.05),
+         cluster_membership_confidence = ifelse(cluster_membership_confidence > 1, 
+                                                1, 
+                                                round(cluster_membership_confidence, 2)))
+
+heatmap_palette <- 
+  colorRampPalette(c("white", "orangered"))(100)
+
+heatmap_data <-
+  file_structure %>% 
+  map(function(x) x$data) %>% 
+  map(function(x) vroom(paste(x, 
+                              "data.tsv",
+                              sep = "/"))) %>% 
+  bind_rows(.id = "dataset_id")
+
+heatmap_clustering_data <- 
+  heatmap_data %>% 
+  left_join(clustering_data %>% 
+              select(dataset_id, gene, cluster),
+            by = c("dataset_id",
+                   "ensg_id" = "gene")) %>% 
+  group_by(dataset_id, ensg_id) %>% 
+  mutate(tmm_scaled = tmm / max(tmm),
+         tmm_zscore = (tmm - mean(tmm, na.rm = T)) / sd(tmm, na.rm = T)) %>% 
+  ungroup()
+
+
+worker_cluster <- new_cluster(n = 5)
+cluster_library(worker_cluster, c("dplyr",
+                           "tidyverse"))
+cluster_copy(worker_cluster, c("file_structure",
+                               "cluster_membconf_data"))
+
+
+heatmap_clustering_data %>% 
+  # filter(cluster %in% 1:10) %>%
+  group_by(dataset_id, cluster) %>% 
+  # partition(worker_cluster) %>%
+  do({
+    g_cluster_data <<- .
+    g_dataset_id <- unique(g_cluster_data$dataset_id)
+    
+    
+    plot_savename_zscore <- 
+      paste0(file_structure[[g_dataset_id]]$heatmap, "/",
+             "heatmap zscore ",
+             unique(g_cluster_data$cluster), 
+             ".svg")
+    
+    plot_savename_scaled <- 
+      paste0(file_structure[[g_dataset_id]]$heatmap, "/",
+             "heatmap scaled ",
+             unique(g_cluster_data$cluster), 
+             ".svg")
+    
+    
+    g_cluster_data_wide <- 
+      g_cluster_data %>% 
+      select(ensg_id, sample_id, tmm_zscore) %>% 
+      spread(sample_id, tmm_zscore) %>% 
+      column_to_rownames("ensg_id") 
+    
+    gene_hclust <- 
+      g_cluster_data_wide %>% 
+      dist() %>% 
+      hclust(method = "ward.D2")
+    
+    sample_hclust <- 
+      g_cluster_data_wide %>%
+      t() %>% 
+      dist() %>% 
+      hclust(method = "ward.D2")
+    
+    plot_data <- 
+      g_cluster_data %>% 
+      mutate(ensg_id = factor(ensg_id, 
+                              rev(gene_hclust$labels[gene_hclust$order])),
+             sample_id = factor(sample_id, 
+                                sample_hclust$labels[sample_hclust$order])) 
+    
+    plot_confidence <- 
+      cluster_membconf_data %>%
+      filter(dataset_id == g_dataset_id) %>% 
+      filter(ensg_id %in% gene_hclust$labels) %>% 
+      mutate(ensg_id = factor(ensg_id, 
+                              rev(gene_hclust$labels[gene_hclust$order]))) %>% 
+      ggplot(aes("Confidence", ensg_id, fill = cluster_membership_confidence)) + 
+      geom_tile() +
+      theme_void() +
+      scale_fill_gradient(low = "#D1EEEA", high = "#2A5674",
+                          limits = c(0.5, 1),
+                          breaks = c(0.5, 0.75, 1),
+                          name = "Confidence") +
+      theme(axis.text.x = element_text(angle = -90, face = "bold"), 
+            legend.position = "left")
+    
+    plot_heat_zscore <- 
+      plot_data %>% 
+      ggplot(aes(sample_id, ensg_id, fill = tmm_zscore)) +
+      geom_tile() +
+      scale_fill_gradient2(low = "#4575B4", high = "#D73027", mid = "#FFFFFF",
+                           name = "Z-score") +
+      theme_void() +
+      theme(axis.text.x = element_text(angle = -90,
+                                       hjust = 0, 
+                                       size = 6),
+            legend.position = "top")
+    
+    
+    plot_heat_scaled <- 
+      plot_data %>% 
+      ggplot(aes(sample_id, ensg_id, fill = tmm_scaled)) +
+      geom_tile() +
+      scale_fill_gradient2(low = "#4575B4", high = "#D73027", mid = "#FFFFFF",
+                           name = "Relative Expression",
+                           breaks = c(0, 0.5, 1),
+                           limits = c(0, 1)) +
+      theme_void() +
+      theme(axis.text.x = element_text(angle = -90,
+                                       hjust = 0,
+                                       size = 6),
+            legend.position = "top")
+      
+    column_width <- (1/53)
+    plot_n <- length(sample_hclust$labels)
+    plot_scaling_factor <- column_width * plot_n
+    
+    plot_widths <- 
+      c(3, plot_n) %>% 
+      {. * column_width} %>% 
+      {. / max(.)}
+    
+    plot_width <- 
+      1 + 4 * plot_scaling_factor
+    
+    p1 <- 
+      plot_confidence + plot_heat_zscore +
+      plot_layout(widths = plot_widths, nrow = 1)
+    p2 <- 
+      plot_confidence + plot_heat_scaled +
+      plot_layout(widths = plot_widths, nrow = 1)
+    
+    ggsave(plot_savename_zscore, plot = p1,  
+           width = plot_width, 
+           height = 5)
+    ggsave(plot_savename_scaled, plot = p2,
+           width = plot_width, 
+           height = 5)
+    
+    tibble()
+  }) %>% 
+  ungroup() %>% 
+  collect()
+
+rm(worker_cluster)
+```
+
+
+
+# Old
+
+```{r}
+
+fischer_res_GO <- 
+  clustering_data %>% 
+  filter(dataset_id == "tissue") %>% 
+  group_by(dataset_id) %>% 
+  do({
+    
+    cluster_membership <- 
+      set_names(.$cluster,
+                .$gene)
+    
+    GO_terms_moderated %>%
+      group_by(GO_domain) %>% 
+      do({
+          term_membership <-
+            distinct(.) %$% 
+            split(ensg_id, GO)
+          
+          gene_fischer_test(cluster_membership, term_membership)
+      })
+    
+  }) %>% 
+  ungroup()
+
+fischer_res_GO %>% 
+  select(dataset_id, GO_domain) %>% 
+  distinct()
+
+
+fischer_res_GO %>% 
+  left_join(GO_terms_dict,
+            by = c("term" = "GO")) %>% 
+  select(1,2,3,4, term_name, everything()) #%>% 
+  # View
+```
+## Fischer
+
+```{r}
+# 
+# spec_class %>% filter(type == "tissue" | type == "singlecell") %>% 
+#   filter(elevated %in% c("Early spermatids", "intestine")) %>% spread(type, elevated) %>% 
+#   filter(complete.cases(.)) %>% 
+#   left_join(gene_info %>% 
+#               select(ensg_id, gene_name, gene_description)) %>% 
+#   left_join(clustering_data %>% 
+#               filter(dataset_id == "tissue"),
+#             by = c("ensg_id" = "gene")) %>% 
+#   View
+
+gene_fischer_test <- 
+  function(cluster_membership, term_membership, alternative = "greater") {
+    n_genes <- 
+      n_distinct(names(cluster_membership))
+    
+    term_membership_moderated <-  
+      term_membership %>% 
+      enframe("term", "gene") %>%
+      unnest(cols = gene) %>% 
+      distinct() %>% 
+      filter(gene %in% names(cluster_membership)) %$% 
+      split(gene, term)
+    
+    
+    joined_genes_terms <- 
+      cluster_membership %>% 
+      enframe("gene", "cluster") %>% 
+      full_join(term_membership_moderated %>%
+                  enframe("term", "gene") %>% 
+                  unnest(cols = gene), 
+                by = "gene") %>% 
+      mutate(term = factor(term),
+             cluster = factor(cluster))
+    
+    
+    fischer_data1 <- 
+      joined_genes_terms %>%
+      filter(!is.na(term)) %>% 
+      group_by(cluster, term) %>% 
+      count() %>% 
+      ungroup()
+    
+    fischer_data2 <- 
+      joined_genes_terms %>%
+      filter(!is.na(term)) %>% 
+      group_by(term) %>% 
+      summarise(total_term = n_distinct(gene),
+                total_nonterm = n_genes - total_term) %>% 
+      ungroup()
+    
+    fischer_data3 <- 
+      joined_genes_terms %>% 
+      group_by(cluster) %>% 
+      summarise(total_in_cluster = n_distinct(gene),
+                total_not_in_cluster = n_genes - total_in_cluster) %>% 
+      ungroup()
+    
+    
+    fisher_data <-
+      fischer_data1 %>% 
+      left_join(fischer_data2,
+                by = "term") %>% 
+      left_join(fischer_data3,
+                by = "cluster") %>% 
+      mutate(incluster_nonterm = total_in_cluster - n,
+             notcluster_term = total_term - n,  
+             notcluster_nonterm = total_nonterm - notcluster_term)
+    
+    
+    fischer_res <- 
+      fisher_data %>% 
+      group_by(cluster, term) %>% 
+      do({
+        g_data <<- .
+        
+        contingency_matrix <-
+          matrix(c(g_data$n, 
+                   g_data$incluster_nonterm,
+                   g_data$notcluster_term,  
+                   g_data$notcluster_nonterm), 
+                 nrow = 2,
+                 dimnames =
+                   list(c("Term", "Nonterm"),
+                        c("In cluster", "Not in cluster")))
+        
+        contingency_matrix %>% 
+          fisher.test(alternative = alternative) %>% 
+          tidy() %>%
+          mutate(term_overlap = paste(contingency_matrix[1], 
+                                      contingency_matrix[1] + contingency_matrix[3],
+                                      sep = "/"),
+                 cluster_membership = paste(contingency_matrix[1], 
+                                            contingency_matrix[1] + contingency_matrix[2],
+                                            sep = "/"))
+      }) %>% 
+      ungroup() %>%
+      mutate(p.value = ifelse(p.value == 0, .Machine$double.xmin, p.value),
+             adj_p = p.adjust(p.value, method = "BH")) %>% 
+      rename(odds_ratio = estimate) %>%
+      arrange(adj_p)
+    
+    return(fischer_res)
+  }
+
+```
 
 ## Cluster levels
 
@@ -128,512 +974,12 @@ cluster_levels <-
   }
 ```
 
-##Spread color
+## Cluster enrichement barplots
 
 ```{r}
-spread_colors <- 
-  function(color, n, colorrange = 0.5) {
-    
-    if(n == 1) {
-      return(color)
-    } else {
-      colorRamp(c("white", color, "black"))(seq(0.5 - colorrange / 2,
-                                                0.5 + colorrange / 2, 
-                                                length.out = n)) %>% 
-        as_tibble() %$% 
-        rgb(V1, V2, V3, maxColorValue = 255) 
-      
-    }
-    
-  }
-```
-
-
-# Run ID
-
-```{r}
-run_id <- "con1"
-
-save_folder <- "results/Annotation reports/fischer test results/"
-
-```
-
-
-#Enrichment analyses
-
-
-
-##GO
-
-```{r}
-
-GO_file <- 
-  paste0(save_folder, 
-         run_id,
-         "enrichment_results_GO.csv")
-
-if(file.exists(GO_file)) {
-  cp_res_GO <- 
-    read_csv(GO_file)
-  
-}else {
-  cluster_membership <-
-    clustering_data %>% 
-    expand_grid(ontology = c("BP", "CC", "MF")) %>%
-    mutate(cluster = as.character(cluster))
-  
-  cp_res_GO <- 
-    cluster_membership %>% 
-    group_by(ontology) %>% 
-    do({
-      g_data <<- .
-      res <-
-        compareCluster(gene ~ dataset_id + cluster,
-                       fun = "enrichGO",
-                       data = g_data,
-                       keyType = "ENSEMBL",
-                       OrgDb = "org.Hs.eg.db",
-                       universe = unique(cluster_membership$gene),
-                       ont = unique(g_data$ontology)) 
-      
-      
-      bind_rows(simplified = res %>% 
-                  simplify(cutoff = 0.7, by = "p.adjust", select_fun = min) %>% 
-                  as_tibble(),
-                original = res %>% 
-                  as_tibble(),
-                .id = "simplified")
-      
-    }) %>% 
-    ungroup()
-  
-  cp_res_GO %>% 
-    write_csv(GO_file)
-}
-
-  
-
-
-
-
-
-
-
-```
-
-
-##KEGG
-
-```{r}
-KEGG_file <- 
-  paste0(save_folder, 
-         run_id,
-         "enrichment_results_KEGG.csv")
-
-if(file.exists(KEGG_file)) {
-  cp_res_KEGG <- 
-    read_csv(KEGG_file)
-  
-}else {
-  
-  clustering_data_entrez <- 
-    clustering_data %>%
-    left_join(entrez_dict,
-              by = c("gene" = "ensg_id")) 
-  
-  
-  cp_res_KEGG <- 
-    clustering_data_entrez %>% 
-    
-    compareCluster(entrez ~ dataset_id + cluster,
-                   fun = "enrichKEGG",
-                   data = .,
-                   # keyType = "ENSEMBL",
-                   universe = unique(clustering_data_entrez$entrez)) %>% 
-    as_tibble()
-  
-  
-  cp_res_KEGG %>% 
-    write_csv(KEGG_file)
-}
-
-
-
-
-
-
-```
-
-##Secretome
-
-```{r}
-
-secretome_file <- 
-  paste0(save_folder, 
-         run_id,
-         "enrichment_results_secretome.csv")
-
-if(file.exists(secretome_file)) {
-  cp_res_secretome <- 
-    read_csv(secretome_file)
-  
-}else {
-  term2gene <<- 
-    secr_class %>% 
-    select(secretome_location, ensg_id)
-  
-  cp_res_secretome <-
-    
-    clustering_data %>%
-    mutate(cluster = as.character(cluster)) %>% 
-    group_by(dataset_id, cluster) %>% 
-    do({
-      g_data <<- .
-      pull(g_data, gene) %>% 
-        enricher(maxGSSize = Inf, 
-                 universe = unique(clustering_data$gene),
-                 TERM2GENE = term2gene) %>% 
-        as_tibble
-    }) %>%  
-    ungroup()
-  
-  
-  cp_res_secretome %>% 
-    write_csv(secretome_file)
-}
- 
-
-
-```
-
-##Specificity
-
-```{r}
-
-specificity_file <- 
-  paste0(save_folder, 
-         run_id,
-         "enrichment_results_specificity.csv")
-
-if(file.exists(specificity_file)) {
-  cp_res_spec <- 
-    read_csv(specificity_file)
-  
-}else {
-  cp_res_spec <-
-    spec_class %>%
-    
-    group_by(spec_type = type) %>% 
-    do({
-      term2gene <<- 
-        ungroup(.) %>% 
-        select(elevated, ensg_id)
-      
-      
-      clustering_data %>%
-        
-        mutate(cluster = as.character(cluster)) %>% 
-        # filter(cluster == 7)-> g_data
-        group_by(dataset_id, cluster) %>% 
-        do({
-          g_data <<- .
-          pull(g_data, gene) %>% 
-            enricher(maxGSSize = Inf, 
-                     universe = unique(clustering_data$gene),
-                     TERM2GENE = term2gene) %>% 
-            as_tibble
-        }) %>% 
-        ungroup()
-    }) %>% 
-    ungroup() 
-  
-  cp_res_spec %>% 
-    write_csv(specificity_file)
-}
- 
-
-
-    
-
 
 plot_data <- 
-  CP_res_spec %>% 
-  group_by(spec_type, dataset_id) %>%
-  mutate(ID_factor = match(ID, cluster_levels(ID, cluster, qvalue, 
-                                              distance_metric = "binary", 
-                                              clustering_method = "ward.D2")),
-         cluster_factor = match(cluster, cluster_levels(cluster, ID, qvalue, 
-                                              distance_metric = "binary", 
-                                              clustering_method = "ward.D2"))) %>% 
-  ungroup() 
-
-plot_settings <- 
-  plot_data %>% 
-  select(spec_type, dataset_id) %>% 
-  distinct() %$%
-  expand_grid(spec_type = unique(spec_type), 
-              dataset_id = unique(dataset_id)) %>% 
-  mutate(i = row_number())
-  
-plots <- 
-  lapply(plot_settings$i,
-         function(i_) {
-           plot_data2 <- 
-             plot_data %>% 
-             filter(spec_type == plot_settings$spec_type[which(plot_settings$i == i_)],
-                    dataset_id == plot_settings$dataset_id[which(plot_settings$i == i_)])
-           
-           g <- 
-             plot_data2 %>% 
-             arrange(ID_factor) %>% 
-             mutate(ID = factor(ID, unique(ID))) %>% 
-             arrange(cluster_factor) %>% 
-             mutate(cluster = factor(cluster, unique(cluster))) %>% 
-             
-             ggplot(aes(cluster, ID, size = odds_ratio, fill = odds_ratio)) +
-             geom_point(shape = 21) +
-             theme_bw() +
-             scale_fill_gradient(low = "white", high = "orangered") +
-             coord_fixed() +
-             ggtitle(paste(plot_settings$dataset_id[which(plot_settings$i == i_)], 
-                           "clustering"), 
-                     
-                     paste(plot_settings$spec_type[which(plot_settings$i == i_)],
-                           "classification"))
-           
-           if(nrow(plot_data2) == 0) {
-             g 
-           } else {
-             g + 
-               scale_x_discrete(expand = expansion(0, 1)) +
-               scale_y_discrete(expand = expansion(0, 1)) 
-               
-           }
-             
-               
-             
-         })
-
-pdf("results/spec enrichment bubble heatmaps.pdf",
-    width =8, height = 8)
-plots  
-dev.off()  
-  
-
-```
-
-##Subcellular location
-
-```{r}
-subcell_file <- 
-  paste0(save_folder, 
-         run_id,
-         "enrichment_results_subcell.csv")
-
-if(file.exists(subcell_file)) {
-  cp_res_subcell <- 
-    read_csv(subcell_file)
-  
-}else {
-  
-  term2gene <<- 
-    subcell_class %>% 
-    select(location, ensg_id)
-  
-  cp_res_subcell <-
-    
-    clustering_data %>%
-    mutate(cluster = as.character(cluster)) %>% 
-    # filter(cluster == 7)-> g_data
-    group_by(dataset_id, cluster) %>% 
-    do({
-      g_data <<- .
-      pull(g_data, gene) %>% 
-        enricher(maxGSSize = Inf, 
-                 universe = unique(clustering_data$gene),
-                 TERM2GENE = term2gene) %>% 
-        as_tibble
-    }) %>%  
-    ungroup() 
-  
-  cp_res_subcell %>% 
-    write_csv(subcell_file)
-}
-
-
-
-```
-
-
-##Panglao
-
-```{r}
-panglao_file <- 
-  paste0(save_folder, 
-         run_id,
-         "enrichment_results_panglao.csv")
-
-if(file.exists(panglao_file)) {
-  cp_res_panglao <- 
-    read_csv(panglao_file)
-  
-}else {
-  
-  term2gene <<- 
-    panglao_db %>% 
-    select(cell_type, ensg_id)
-  
-  cp_res_panglao <-
-    
-    clustering_data %>%
-    mutate(cluster = as.character(cluster)) %>% 
-    # filter(cluster == 7)-> g_data
-    group_by(dataset_id, cluster) %>% 
-    do({
-      g_data <<- .
-      pull(g_data, gene) %>% 
-        enricher(maxGSSize = Inf, 
-                 universe = unique(clustering_data$gene),
-                 TERM2GENE = term2gene) %>% 
-        as_tibble
-    }) %>%  
-    ungroup() 
-  
-  cp_res_panglao %>% 
-    write_csv(panglao_file)
-}
-
-
-
-```
-
-##IHC annotation
-
-```{r}
-subcell_file <- 
-  paste0(save_folder, 
-         run_id,
-         "enrichment_results_subcell.csv")
-
-if(file.exists(subcell_file)) {
-  cp_res_subcell <- 
-    read_csv(subcell_file)
-  
-}else {
-  
-  term2gene <<- 
-    subcell_class %>% 
-    select(location, ensg_id)
-  
-  cp_res_subcell <-
-    
-    clustering_data %>%
-    mutate(cluster = as.character(cluster)) %>% 
-    # filter(cluster == 7)-> g_data
-    group_by(dataset_id, cluster) %>% 
-    do({
-      g_data <<- .
-      pull(g_data, gene) %>% 
-        enricher(maxGSSize = Inf, 
-                 universe = unique(clustering_data$gene),
-                 TERM2GENE = term2gene) %>% 
-        as_tibble
-    }) %>%  
-    ungroup() 
-  
-  cp_res_subcell %>% 
-    write_csv(subcell_file)
-}
-
-
-
-```
-
-##HPA protein class
-
-```{r}
-proteinclass_file <- 
-  paste0(save_folder, 
-         run_id,
-         "enrichment_results_proteinclass.csv")
-
-if(file.exists(proteinclass_file)) {
-  cp_res_protein_class <- 
-    read_csv(proteinclass_file)
-  
-}else {
-  
-  term2gene <<- 
-    protein_class %>% 
-    select(protein_class, ensg_id)
-  
-  cp_res_protein_class <-
-    
-    clustering_data %>%
-    mutate(cluster = as.character(cluster)) %>% 
-    # filter(cluster == 7)-> g_data
-    group_by(dataset_id, cluster) %>% 
-    do({
-      g_data <<- .
-      pull(g_data, gene) %>% 
-        enricher(maxGSSize = Inf, 
-                 universe = unique(clustering_data$gene),
-                 TERM2GENE = term2gene) %>% 
-        as_tibble
-    }) %>%  
-    ungroup() 
-  
-  cp_res_protein_class %>% 
-    write_csv(proteinclass_file)
-}
-
-
-
-```
-##Save results
-
-```{r}
-
-cp_all_res <- 
-  list(cp_res_GO %>% 
-         mutate(test_type = paste0("GO_", ontology, "_", simplified)) %>% 
-         select(-ontology, -Cluster, -simplified),
-       cp_res_KEGG %>% 
-         mutate(test_type = "KEGG") %>% 
-         select(-Cluster),
-       cp_res_secretome %>% 
-         mutate(test_type = "secretome"),
-       cp_res_spec %>% 
-         mutate(test_type = paste0("specificity_", spec_type)) %>% 
-         select(-spec_type),
-       cp_res_subcell %>% 
-         mutate(test_type = "subcellular_location"), 
-       cp_res_panglao %>% 
-         mutate(test_type = "panglao_cellmarkers"), 
-       cp_res_protein_class %>% 
-         mutate(test_type = "protein_class")) %>% 
-  map(function(x) mutate(x, cluster = as.character(cluster))) %>% 
-  bind_rows() %>% 
-  mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
-           as.numeric(gsub(".*\\/", "", GeneRatio)),
-         BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
-           as.numeric(gsub(".*\\/", "", BgRatio)),
-         odds_ratio = GeneFrac / BgFrac)  %>% 
-  select(1,2,3,4,GeneRatio, GeneFrac, BgRatio, BgFrac, odds_ratio, everything())
-
-cp_all_res %>% 
-  write_csv("results/Annotation reports/fischer test results/enrichment_results.csv")
-  
-
-cp_all_res %>% 
-  group_by(dataset_id) %>% 
-  do({
-    g_data <<- .
-    write_csv(g_data, paste0("results/Annotation reports/fischer test results/enrichment_results ", unique(g_data$dataset_id), ".csv"))
-  })
-
-plot_data <- 
-  cp_all_res %>% 
+  all_res %>% 
   filter(!grepl("original", test_type)) %>% 
   mutate(Description = ifelse(str_length(Description) > 50,
                               paste0(substr(Description, 0, 50), "..."),
@@ -688,155 +1034,9 @@ pdf(paste0("results/cluster enrichment plots.pdf"),
 plots
 dev.off()
 
-
-
 ```
 
-# Generate treemaps 
-
-```{r}
-
-ontology_pal <- 
-  c("MF" = "#FF6F00",
-    "CC" = "#C71B00",
-    "BP" = "#018EA0")
-
-GO_sim <-
-  pblapply(c("BP" = "GO_BP_original",
-             "CC" = "GO_CC_original", 
-             "MF" = "GO_MF_original"),
-           function(ont_) {
-             GO_terms <-
-               cp_all_res %>% 
-               filter(test_type == ont_) %>% 
-               pull(ID) %>% 
-               unique()
-             
-             calculateSimMatrix(GO_terms, 
-                                orgdb = "org.Hs.eg.db",
-                                ont = str_extract(ont_, "BP|CC|MF"),
-                                method = "Wang")
-           })
-
-
-
-plot_legend <-
-  enframe(ontology_pal,
-          "Ontology", 
-          "Color") %>% 
-  ggplot(aes(1, 1, fill = Ontology)) +
-  geom_tile() +
-  scale_fill_manual(values = ontology_pal)
-
-ggpubr::get_legend(plot_legend) %>% 
-  ggpubr::as_ggplot()
-ggsave("results/Ontology legend.svg",
-       width = 1, height = 1)
-
-
-plot_data <- 
-  cp_all_res %>%
-  filter(test_type %in% c("GO_BP_original",
-                          "GO_CC_original", 
-                          "GO_MF_original")) %>% 
-  mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
-           as.numeric(gsub(".*\\/", "", GeneRatio)),
-         ontology = str_extract(test_type, "BP|CC|MF")) %>% 
-  group_by(ontology, test_type, dataset_id, cluster) %>% 
-  filter(n_distinct(ID) >= 2) %>% 
-  group_by(ontology, test_type, dataset_id, cluster) %>% 
-  do({
-    g_data <<- .
-    
-    sim_mat <- 
-      GO_sim[[unique(g_data$ontology)]][g_data$ID,
-                                        g_data$ID]
-    
-    sim_mat %>%
-      reduceSimMatrix(setNames(-log10(g_data$p.adjust), g_data$ID),
-                      threshold=0.7,
-                      orgdb="org.Hs.eg.db") %>%
-      as_tibble() %>%
-      rename(term_cluster = cluster)
-    
-    
-  }) %>% 
-  
-  ungroup()
-
-
-
-
-
-plot_settings <-
-  plot_data %>% 
-  select(dataset_id, cluster) %>% 
-  arrange(dataset_id, as.numeric(cluster)) %>% 
-  distinct() %>% 
-  mutate(i = row_number())
-
-plots <- 
-  pblapply(plot_settings$i,
-           function(i) {
-             plot_data %>% 
-               filter(dataset_id == plot_settings$dataset_id[i],
-                      cluster == plot_settings$cluster[i]) %>% 
-               left_join(enframe(ontology_pal,
-                                 "ontology", 
-                                 "color"),
-                         by = "ontology") %>% 
-               group_by(parent) %>% 
-               mutate(nn = n_distinct(go),
-                      color2 = spread_colors(unique(color), n_distinct(go), colorrange = 0.2)) %>% 
-               ggplot(aes(area = score, subgroup = parentTerm)) +
-               
-               geom_treemap(aes(fill = color2), 
-                            color = "black",
-                            show.legend = T) +
-               geom_treemap_subgroup_border(color = "black") +
-               
-               geom_treemap_text(aes(label = term),
-                                 colour = "black", 
-                                 place = "centre",
-                                 alpha = 0.4,
-                                 grow = TRUE) +
-               
-               geom_treemap_subgroup_text(place = "centre", 
-                                          grow = T, 
-                                          reflow = T,
-                                          alpha = 1, 
-                                          colour = "white", 
-                                          fontface = "bold",
-                                          min.size = 0) +
-               
-               scale_fill_identity() +
-               theme_void() +
-               ggtitle(paste(plot_settings$dataset_id[i],
-                             "cluster",
-                             plot_settings$cluster[i]))
-           })
-
-
-for(i in plot_settings$i) {
-  setting <- 
-    plot_settings[i, ]
-  ggsave(paste0("results/Annotation reports/svg/treemap/GO treemap ", 
-                setting$dataset_id, " ",
-                setting$cluster,
-                ".svg"),
-         plots[[i]],
-         width = 6, height = 4)
-}
-
-pdf("results/GO treemaps.pdf")
-plots
-dev.off()
-
-
-```
-
-
-# Compare clusterings
+## Compare clusterings
 
 ```{r}
 
@@ -974,140 +1174,3 @@ clustering_overlap_pca$scores %>%
 ```
 
 
-
-# Old
-
-```{r}
-
-fischer_res_GO <- 
-  clustering_data %>% 
-  filter(dataset_id == "tissue") %>% 
-  group_by(dataset_id) %>% 
-  do({
-    
-    cluster_membership <- 
-      set_names(.$cluster,
-                .$gene)
-    
-    GO_terms_moderated %>%
-      group_by(GO_domain) %>% 
-      do({
-          term_membership <-
-            distinct(.) %$% 
-            split(ensg_id, GO)
-          
-          gene_fischer_test(cluster_membership, term_membership)
-      })
-    
-  }) %>% 
-  ungroup()
-
-fischer_res_GO %>% 
-  select(dataset_id, GO_domain) %>% 
-  distinct()
-
-
-fischer_res_GO %>% 
-  left_join(GO_terms_dict,
-            by = c("term" = "GO")) %>% 
-  select(1,2,3,4, term_name, everything()) #%>% 
-  # View
-```
-## Fischer
-
-```{r}
-gene_fischer_test <- 
-  function(cluster_membership, term_membership, alternative = "greater") {
-    n_genes <- 
-      n_distinct(names(cluster_membership))
-    
-    term_membership_moderated <-  
-      term_membership %>% 
-      enframe("term", "gene") %>%
-      unnest(cols = gene) %>% 
-      distinct() %>% 
-      filter(gene %in% names(cluster_membership)) %$% 
-      split(gene, term)
-    
-    
-    joined_genes_terms <- 
-      cluster_membership %>% 
-      enframe("gene", "cluster") %>% 
-      full_join(term_membership_moderated %>%
-                  enframe("term", "gene") %>% 
-                  unnest(cols = gene), 
-                by = "gene") %>% 
-      mutate(term = factor(term),
-             cluster = factor(cluster))
-    
-    
-    fischer_data1 <- 
-      joined_genes_terms %>%
-      filter(!is.na(term)) %>% 
-      group_by(cluster, term) %>% 
-      count() %>% 
-      ungroup()
-    
-    fischer_data2 <- 
-      joined_genes_terms %>%
-      filter(!is.na(term)) %>% 
-      group_by(term) %>% 
-      summarise(total_term = n_distinct(gene),
-                total_nonterm = n_genes - total_term) %>% 
-      ungroup()
-    
-    fischer_data3 <- 
-      joined_genes_terms %>% 
-      group_by(cluster) %>% 
-      summarise(total_in_cluster = n_distinct(gene),
-                total_not_in_cluster = n_genes - total_in_cluster) %>% 
-      ungroup()
-    
-    
-    fisher_data <-
-      fischer_data1 %>% 
-      left_join(fischer_data2,
-                by = "term") %>% 
-      left_join(fischer_data3,
-                by = "cluster") %>% 
-      mutate(incluster_nonterm = total_in_cluster - n,
-             notcluster_term = total_term - n,  
-             notcluster_nonterm = total_nonterm - notcluster_term)
-    
-    
-    fischer_res <- 
-      fisher_data %>% 
-      group_by(cluster, term) %>% 
-      do({
-        g_data <<- .
-        
-        contingency_matrix <-
-          matrix(c(g_data$n, 
-                   g_data$incluster_nonterm,
-                   g_data$notcluster_term,  
-                   g_data$notcluster_nonterm), 
-                 nrow = 2,
-                 dimnames =
-                   list(c("Term", "Nonterm"),
-                        c("In cluster", "Not in cluster")))
-        
-        contingency_matrix %>% 
-          fisher.test(alternative = alternative) %>% 
-          tidy() %>%
-          mutate(term_overlap = paste(contingency_matrix[1], 
-                                      contingency_matrix[1] + contingency_matrix[3],
-                                      sep = "/"),
-                 cluster_membership = paste(contingency_matrix[1], 
-                                            contingency_matrix[1] + contingency_matrix[2],
-                                            sep = "/"))
-      }) %>% 
-      ungroup() %>%
-      mutate(p.value = ifelse(p.value == 0, .Machine$double.xmin, p.value),
-             adj_p = p.adjust(p.value, method = "BH")) %>% 
-      rename(odds_ratio = estimate) %>%
-      arrange(adj_p)
-    
-    return(fischer_res)
-  }
-
-```
