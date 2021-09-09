@@ -503,16 +503,19 @@ find_consensus <- function(all_clusterings, id, get_membership = F, runs = 1) {
                                                  nruns = runs, 
                                                  verbose = FALSE)) 
   
+  cons_clusters <- as.numeric(cl_class_ids(cons_clustering)) %>% unique() %>% sort()
+  final_clusters <- c(1:length(cons_clusters))
+                            
+             
+  mapping_table <-  data.frame(cluster_cons = cons_clusters,
+                               cluster = final_clusters)
+  
   final_clustering <- data.frame(gene = names(cl_class_ids(cons_clustering)), 
-                                 cluster_cons = as.numeric(cl_class_ids(cons_clustering)),
-                                 cluster = unclass(factor(as.numeric(cl_class_ids(cons_clustering)))))
+                                 cluster_cons = as.numeric(cl_class_ids(cons_clustering))) %>% 
+    left_join(mapping_table) %>% 
+    select(-cluster_cons)
   
   
-  # ungroup() %>% 
-  #   group_by(dataset_id,resolution) %>% 
-  #   mutate(cluster = unclass(factor(cluster))
-           
-           
   if (get_membership) {
     # Extract cluster membership matrix 
     cons_matrix <- 
@@ -520,11 +523,16 @@ find_consensus <- function(all_clusterings, id, get_membership = F, runs = 1) {
       as_tibble(rownames = "gene") %>% 
       gather(cluster, membership, -1) %>% 
       filter(membership > 0) %>% 
-      mutate(cluster = gsub("V", "", cluster))
+      mutate(cluster = as.numeric(gsub("V", "", cluster))) %>% 
+      rename(cluster_cons = cluster) %>% 
+      left_join(mapping_table) %>% 
+      select(-cluster_cons)
     
     return(list(consensus_clustering = final_clustering, 
+                mapping_table = mapping_table,
                 membership_matrix = cons_matrix ))
   } else {
-    return(final_clustering)
+    return(list(consensus_clustering = final_clustering, 
+                mapping_table = mapping_table))
   }
 }
