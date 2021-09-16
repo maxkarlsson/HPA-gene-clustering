@@ -49,7 +49,7 @@ source("scripts/functions_classification.R")
 ## Read metadata
 ```{r}
 
-dataset_metadata <- read_csv("run_settings/20210901_settings.csv")
+dataset_metadata <- read_csv("run_settings/20210914_settings.csv")
 
 all_data_meta <- 
   readRDS("data/processed/all_cluster_data_metadata_mockup2.rds")$all_data_meta %>% 
@@ -89,7 +89,8 @@ GOterms <-
          GO_term_evidence = 6) %>% 
   filter(ensg_id %in% all_genes_in_data)
 
-
+db_terms <- read_tsv("data/database_terms.tsv")
+  
 ```
 
 ## Settings
@@ -120,31 +121,13 @@ dataset_palette <- c("tissue" = "#0083C4", "singlecell" = "#6AA692", "brain" = "
    
 ```
 
-
-## Run ID
-
-```{r}
-
-# This run ID is used to check whether the run is already performed. 
-# In that case files will be reloaded instead of rerunning calculations.
-# run_id <- 
-#   "new_aggregation"
-# run_file <- 
-#   paste0("data/processed/clusters_", run_id, ".rds")
-# 
-# 
-# run_id_savename <- 
-#   . %>% 
-#   paste0("results/", run_id, " ", .)
-```
-
 ## File structure
 ```{r}
 
 file_structure <-
   create_folder_structure(dataset_id = dataset_metadata$dataset_id,
                           dataset_run_id = dataset_metadata$version,
-                          main_folder = "results/Clustering results",
+                          main_folder = "results/Clustering results", # CHANGE TO AVOID SPACES
                           folders = c("svg" = "svg",
                                       "data" = "data",
                                       "treemap" = "svg/treemap",
@@ -189,7 +172,8 @@ cluster_library(cluster, c("dplyr",
                            "Seurat",
                            "magrittr",
                            "cluster",
-                           "clValid")) 
+                           "clValid",
+                           "vroom")) 
 cluster_copy(cluster, c("HPA_gene_clustering", 
                         "generate_savefile", 
                         "scale_data",
@@ -213,17 +197,18 @@ all_data_cluster <-
   group_by(dataset_id) %>%      
   partition(cluster) %>% 
   do({
-    g_data <<- .
-    
+    g_data <- .
+  
     g_dataset_id <- 
       unique(g_data$dataset_id)
     
     savefile_cluster <- 
-      paste(file_structure[[g_dataset_id]]$clustering, "screening_clustering.csv", sep = "/")
+      paste(file_structure[[g_dataset_id]]$clustering, "screening_clustering.tsv", sep = "/")
     
     if(file.exists(savefile_cluster)) {
       cluster_res <-
-        read_csv(savefile_cluster)
+        read_tsv(savefile_cluster)  %>% 
+  spread(seed, cluster, sep = "_")
         
     } else {
       savefile_pca = paste(file_structure[[g_dataset_id]]$PCA, "PCA.rds", sep = "/")
@@ -246,16 +231,26 @@ all_data_cluster <-
                             scaling = "zscore",
                             distance_metric = "spearman",
                             clustering_method = "louvain",
-                            seed = 1:10,
-                            resolution = seq.int(0.1, 13, by = 0.1),
+                            seed = 1:100,
+                            resolution = seq.int(1, 9.1, by = 0.2), #0.1, 13
                             npcs = 100,
                             log_transform = F) 
       
       cluster_res <- 
         cluster_res$cluster_data %>% 
-        mutate(cluster = as.character(cluster + 1))
+        mutate(cluster = as.character(cluster + 1))%>%
+        group_by(resolution, seed) %>%
+        mutate(k = n_distinct(cluster)) %>%
+        ungroup() %>%
+        group_by(resolution) %>%
+        mutate(resolution_k = ceiling(median(k))) %>%
+        ungroup() %>%
+        filter(resolution_k >= 30,
+               resolution_k <= 110) %>%
+        select(-k, -resolution_k) %>%
+        spread(seed, cluster, sep = "_")
       
-      write_csv(cluster_res, savefile_cluster)
+      write_tsv(cluster_res, savefile_cluster)
     }
     
     cluster_res
@@ -266,7 +261,28 @@ all_data_cluster <-
 
 rm(cluster)
 Sys.time() - t
-
+# 
+# blood <- vroom("results/Clustering results/blood testv4/clustering/screening_clustering.csv")
+#   
+# brain <- vroom("results/Clustering results/brain testv4/clustering/screening_clustering.csv")
+# tissue <- vroom("results/Clustering results/tissue testv4/clustering/screening_clustering.csv")
+# celline <- vroom("results/Clustering results/celline_consensus testv4/clustering/screening_clustering.csv")
+# singlecell <- vroom("results/Clustering results/singlecell testv4/clustering/screening_clustering.csv")
+# 
+# singlecell_w <-
+#   singlecell %>%
+#   group_by(resolution, seed) %>%
+#   mutate(k = n_distinct(cluster)) %>%
+#   ungroup() %>%
+#   group_by(resolution) %>%
+#   mutate(resolution_k = ceiling(median(k))) %>%
+#   ungroup() %>%
+#   filter(resolution_k >= 30,
+#          resolution_k <= 110) %>%
+#   select(-k, -resolution_k) %>%
+#   spread(seed, cluster, sep = "_")
+# 
+# write_tsv(singlecell_w, "results/Clustering results/singlecell testv4/clustering/screening_clustering.tsv")
 
 ```
 
@@ -310,8 +326,314 @@ cluster_copy(cluster, c("find_consensus",
 # For all datasets
 all_clusters_consensus <- 
   data_cluster %>% 
+  select(-k, -resolution_k) %>% 
+  spread(seed, cluster, sep = "_") %>%  
   group_by(dataset_id) %>% 
   partition(cluster) %>% 
+  do({
+    g_data <<- .
+    
+    g_dataset_id <- 
+      unique(g_data$dataset_id)
+    
+    savefile_cluster <- 
+      paste(file_structure[[g_dataset_id]]$clustering, "screening_consensus.tsv", sep = "/")
+   # savefile_cluster_mapping <- 
+   #   paste(file_structure[[g_dataset_id]]$clustering, "cluster_mapping_screening_consensus.csv", sep = "/")
+    
+    if(file.exists(savefile_cluster)) {
+      consensus <-
+        read_tsv(savefile_cluster)
+      
+    } else {
+      
+      consensus <- 
+        g_data %>% 
+        group_by(resolution) %>% 
+        #partition(cluster) %>% 
+        do({
+          dat <- .
+          
+          ensemble <- lapply(c(1:100), function(x)
+            dat %>% 
+              select(gene, paste("seed_", x, sep = "")) %>% 
+              deframe() %>% 
+              as.cl_partition
+          ) %>% 
+            as.cl_ensemble()
+          
+          num_clusters <- lapply(c(1:100), function(x)
+            dat %>% 
+              pull(paste("seed_", x, sep = "")) %>% 
+              max()) 
+          
+          k <- as.numeric(num_clusters) %>% 
+            #  quantile(0.25) %>%  
+            median() %>% 
+            floor()
+          
+          set.seed(1)
+          
+          cons_clustering <- cl_consensus(ensemble, 
+                                          method = "SE", 
+                                          control = list(k = k, 
+                                                         nruns = 1, 
+                                                         verbose = FALSE)) 
+          final_clustering <- 
+            cl_class_ids(cons_clustering) %>% 
+            enframe(name = "gene", value ="cluster")
+          
+          empty_clusters <- 
+            final_clustering %>% 
+            group_by(cluster) %>% 
+            mutate(size = n_distinct(gene)) %>% 
+            filter(size < 5) %>% 
+            select(-size) %>% 
+            mutate(cluster = as.numeric(cluster)) 
+          
+          if(dim(empty_clusters)[1] != 0) {
+            to_rename <- 
+              empty_clusters %>% 
+              group_by(gene) %>% 
+              do({
+                current <- .
+                
+                probabilities <- 
+                  cons_clustering$.Data[,] %>% 
+                  as_tibble(rownames = "gene") %>% 
+                  filter(gene == current$gene) %>% 
+                  select(-gene) %>% 
+                  gather(cluster,probability) %>% 
+                  arrange(-probability) %>% 
+                  mutate(cluster = as.numeric(sub("V", "", cluster)))
+                data.frame(gene = current$gene, 
+                           new_cluster = probabilities[[2,1]])
+              })
+            
+            final_clustering_corrected <- 
+              final_clustering %>% 
+              mutate(cluster = as.numeric(cluster)) %>% 
+              left_join(to_rename) %>% 
+              mutate(new_cluster = if_else(is.na(new_cluster), cluster, new_cluster))
+            
+            
+            mapping_table <- 
+              final_clustering_corrected %>% 
+              select(new_cluster) %>% 
+              distinct() %>% 
+              arrange(new_cluster) %>% 
+              rownames_to_column("renumbered_cluster")
+            
+            final_clustering <- 
+              final_clustering_corrected %>% 
+              left_join(mapping_table) %>% 
+              select(-new_cluster) %>% 
+              rename(cons_cluster = cluster,
+                     cluster = renumbered_cluster) %>% 
+              mutate(cluster = as.character(cluster),
+                     cons_cluster = as.character(cons_cluster))
+            
+          } else {
+            final_clustering <- final_clustering %>% 
+              mutate(cluster = as.character(cluster), 
+                     cons_cluster = cluster)
+          }
+          
+          final_clustering
+        }) %>% 
+         #collect() %>% 
+        ungroup()
+      
+      write_csv(consensus, savefile_cluster)
+      
+      consensus
+    }
+    
+  }) %>%  
+   collect() %>% 
+  ungroup()
+
+rm(cluster)
+
+
+
+##############
+blood <- read_csv("results/Clustering results/brain testv4/clustering/screening_clustering.csv")
+
+blood %>%
+  group_by(resolution, seed, cluster) %>%
+  summarize(size = n_distinct(gene)) %>%
+  ungroup() %>%
+  group_by(resolution, seed) %>%
+  summarize(min_size = min(size),
+            k = n_distinct(cluster)) %>%
+  ungroup() %>%
+  filter(k > 30,
+         k < 110) %>%
+  ggplot(aes(resolution, min_size)) +
+  geom_point() +
+  theme_bw()
+
+### Select resolution range
+
+blood_selection <- 
+  blood %>% 
+  group_by(resolution, seed) %>% 
+  mutate(k = n_distinct(cluster)) %>% 
+  ungroup() %>% 
+  group_by(resolution) %>% 
+  mutate(resolution_k = ceiling(median(k))) %>% 
+  ungroup() %>% 
+  filter(resolution_k >= 30,
+         resolution_k <= 110)
+
+blood_selction_w <- 
+  blood_selection %>% 
+  select(-k, -resolution_k) %>% 
+  spread(seed, cluster, sep = "_")
+
+
+
+### Consensus
+
+cluster <- new_cluster(n = 5)
+cluster_library(cluster, c("dplyr",
+                           "tidyverse",
+                           "magrittr",
+                           "clue")) 
+cluster_copy(cluster, c("find_consensus", 
+                        "to_cluster",
+                        "file_structure"))
+
+# For all datasets
+t <- Sys.time()
+
+blood_selction_consenus <- 
+  blood_selction_w %>% 
+  filter(resolution %in% c("1.3", "1.5")) %>% 
+  group_by(resolution) %>% 
+  partition(cluster) %>% 
+  do({
+    dat <- .
+    
+    ensemble <- lapply(c(1:100), function(x)
+      dat %>% 
+        select(gene, paste("seed_", x, sep = "")) %>% 
+        deframe() %>% 
+        as.cl_partition
+    ) %>% 
+      as.cl_ensemble()
+    
+    num_clusters <- lapply(c(1:100), function(x)
+      dat %>% 
+        pull(paste("seed_", x, sep = "")) %>% 
+        max()) 
+    
+    k <- as.numeric(num_clusters) %>% 
+    #  quantile(0.25) %>%  
+      median() %>% 
+      floor()
+    
+    set.seed(1)
+    
+    cons_clustering <- cl_consensus(ensemble, 
+                                    method = "SE", 
+                                    control = list(k = k, 
+                                                   nruns = 1, 
+                                                   verbose = FALSE)) 
+    final_clustering <- 
+      cl_class_ids(cons_clustering) %>% 
+      enframe(name = "gene", value ="cluster")
+    
+    empty_clusters <- 
+      final_clustering %>% 
+      group_by(cluster) %>% 
+      mutate(size = n_distinct(gene)) %>% 
+      filter(size < 5) %>% 
+      select(-size) %>% 
+      mutate(cluster = as.numeric(cluster)) 
+    
+    if(dim(empty_clusters)[1] != 0) {
+      to_rename <- 
+        empty_clusters %>% 
+        group_by(gene) %>% 
+        do({
+          current <- .
+          
+          probabilities <- 
+            cons_clustering$.Data[,] %>% 
+            as_tibble(rownames = "gene") %>% 
+            filter(gene == current$gene) %>% 
+            select(-gene) %>% 
+            gather(cluster,probability) %>% 
+            arrange(-probability) %>% 
+            mutate(cluster = as.numeric(sub("V", "", cluster)))
+          data.frame(gene = current$gene, 
+                     new_cluster = probabilities[[2,1]])
+        })
+      
+      final_clustering_corrected <- 
+        final_clustering %>% 
+        mutate(cluster = as.numeric(cluster)) %>% 
+        left_join(to_rename) %>% 
+        mutate(new_cluster = if_else(is.na(new_cluster), cluster, new_cluster))
+      
+      
+      mapping_table <- 
+        final_clustering_corrected %>% 
+        select(new_cluster) %>% 
+        distinct() %>% 
+        arrange(new_cluster) %>% 
+        rownames_to_column("renumbered_cluster")
+      
+      final_clustering <- 
+        final_clustering_corrected %>% 
+        left_join(mapping_table) %>% 
+        select(-new_cluster) %>% 
+        rename(cons_cluster = cluster,
+               cluster = renumbered_cluster) %>% 
+        mutate(cluster = as.character(cluster),
+               cons_cluster = as.character(cons_cluster))
+      
+    } else {
+      final_clustering <- final_clustering %>% 
+        mutate(cluster = as.character(cluster), 
+               cons_cluster = cluster)
+    }
+    
+    final_clustering
+  }) %>% 
+  collect() %>% 
+  ungroup()
+  
+  Sys.time() - t
+
+  
+  
+final_clustering %>% 
+  group_by(cluster) %>% 
+  summarize(size = n_distinct(gene)) %>% 
+  arrange(size)
+
+
+
+
+
+################
+cluster <- new_cluster(n = 5)
+cluster_library(cluster, c("dplyr",
+                           "tidyverse",
+                           "magrittr",
+                           "clue")) 
+cluster_copy(cluster, c("find_consensus", 
+                        "to_cluster",
+                        "file_structure"))
+
+# For all datasets
+all_clusters_consensus <- 
+  data_cluster %>% 
+  group_by(dataset_id) %>% 
+  #partition(cluster) %>% 
   do({
     g_data <<- .
     
@@ -350,16 +672,13 @@ all_clusters_consensus <-
     }
     
   }) %>%  
-  collect()
+ # collect()
 
 rm(cluster)
 
+# 
 
 
-all_clusters_consensus %>% 
-  group_by(dataset_id, resolution, cluster) %>% 
-  summarise(n = n_distinct(gene)) %>% 
-  arrange(n)
 ```
 
 # UMAP
@@ -382,11 +701,11 @@ graph_umaps <-
     graph_ <- all_data_graphs[[dataset_id_]]
     
     savefile_UMAP <- 
-      paste(file_structure[[dataset_id_]]$UMAP, "UMAP.csv", sep = "/")
+      paste(file_structure[[dataset_id_]]$UMAP, "UMAP.tsv", sep = "/")
     
     if(file.exists(savefile_UMAP)) {
       UMAP_res <-
-        read_csv(savefile_UMAP)
+        read_tsv(savefile_UMAP)
       
     } else {
       
@@ -413,7 +732,7 @@ graph_umaps <-
                   suffix = c("", "_scaled"))
       
       
-      write_csv(UMAP_res, savefile_UMAP)
+      write_tsv(UMAP_res, savefile_UMAP)
     }
     
     
@@ -437,13 +756,15 @@ ARI_res <-
       unique(g_data$dataset_id)
     
     savefile_ARI <- 
-      paste(file_structure[[g_dataset_id]]$evaluation, "ARI.csv", sep = "/")
+      paste(file_structure[[g_dataset_id]]$evaluation, "ARI.tsv", sep = "/")
     
     if(file.exists(savefile_ARI)) {
       ARI_scores <-
-        read_csv(savefile_ARI)
+        read_tsv(savefile_ARI)
         
     } else {
+      
+      g_data <- blood_selection 
       
       ARI_scores <- 
         g_data %>% 
@@ -456,13 +777,13 @@ ARI_res <-
             as_tibble() %>% 
             set_names(c("seed1", "seed2")) %>% 
             group_by_all() %>% 
-            mutate(ARI = ARI(dat %>% filter(seed == seed1) %>% select(gene,cluster) %>%  df_to_vector(), 
-                             dat %>%  filter(seed == seed2) %>% select(gene,cluster) %>%  df_to_vector()))
+            mutate(ARI = ARI(dat %>% filter(seed == seed1) %>% select(gene,cluster) %>%  deframe(), 
+                             dat %>%  filter(seed == seed2) %>% select(gene,cluster) %>%  deframe()))
           
         }) %>% 
         ungroup()
       
-      write_csv(ARI_scores, savefile_ARI)
+      write_tsv(ARI_scores, savefile_ARI)
     }
     
     ARI_scores
@@ -499,17 +820,17 @@ MI_res_consensus <-
   group_by(dataset_id) %>%
   partition(worker_cluster) %>%
   do({
-    g_data <<- .
+    g_data <- .
     
     g_dataset_id <- 
       unique(g_data$dataset_id)
     
     savefile_MIGO <- 
-      paste(file_structure[[g_dataset_id]]$evaluation, "MI_GO.csv", sep = "/")
+      paste(file_structure[[g_dataset_id]]$evaluation, "MI_GO.tsv", sep = "/")
     
     if(file.exists(savefile_MIGO)) {
       MI_scores <-
-        read_csv(savefile_MIGO)
+        read_tsv(savefile_MIGO)
         
     } else {
       
@@ -524,7 +845,7 @@ MI_res_consensus <-
         }) %>% 
         ungroup()
       
-      write_csv(MI_scores, savefile_MIGO)
+      write_tsv(MI_scores, savefile_MIGO)
     }
     
     MI_scores
@@ -541,10 +862,8 @@ Sys.time() - t
 ```{r Evaluation based on Mutual Information}
 # REACTOME
 
-databases <- read_tsv("data/database_terms.tsv")
-
 MI_Rterms <- 
-  databases %>%
+  db_terms %>%
   filter(id == "reactome") %>% 
   filter(!is.na(term_id)) %>%
   distinct() %>% 
@@ -568,7 +887,7 @@ MI_R_consensus <-
   group_by(dataset_id) %>%
   partition(worker_cluster) %>%
   do({
-    g_data <<- .
+    g_data <- .
     
     g_dataset_id <- 
       unique(g_data$dataset_id)
@@ -607,7 +926,62 @@ Sys.time() - t
 
 #9.25
 
+g_data <- final_clustering
+ 
+
+MI_R <-
+  blood_selection %>% 
+  filter(seed == 1) %>% 
+  select(resolution, gene, cluster) %>%
+  mutate(cluster = as.character(cluster)) %>%
+  group_by(resolution) %>% 
+  do({
+      calculate_MI_reactome(., MI_Rterms, nrep = 300)
+  })
+
+MI_GO <-
+  blood_selection %>% 
+  filter(seed == 1) %>% 
+  select(resolution, gene, cluster) %>%
+  mutate(cluster = as.character(cluster)) %>%
+  group_by(resolution) %>% 
+  do({
+      calculate_MI(., MI_GO, nrep = 300)
+  })
+
+MI_R %>% 
+  ggplot(aes(resolution, z_score)) +
+  geom_point()
+
+clust <- blood_selction_consenus %>% filter(resolution == "1.3")
+genes <- clust$gene
+
+tissue_terms <- 
+  read_tsv("data/meta/consensus_all_category_92.tsv") %>% 
+  filter(ensg_id %in% genes) %>%
+  separate_rows("enhanced_tissues", sep = ',') %>%
+  select(ensg_id,enhanced_tissues) %>%
+  remove_missing() %>% 
+  rename(term_id = enhanced_tissues)
+
+MI_tissue <-
+  blood_selection %>% 
+  filter(seed == 1) %>% 
+  select(resolution, gene, cluster) %>%
+  mutate(cluster = as.character(cluster)) %>%
+  group_by(resolution) %>% 
+  do({
+      calculate_MI_reactome(., tissue_terms, nrep = 300)
+  })
+
+ calculate_MI_reactome(clust, tissue_terms, nrep = 300)
+ 
+ MI_tissue %>% 
+   ggplot(aes(resolution, z_score)) +
+   geom_point()
+
 ```
+
 
 ## UMAP - cluster dispersion
 ```{r}
@@ -631,11 +1005,11 @@ intracluster_distances <-
       unique(g_data$dataset_id)
     
     intracluster_dist_file <- 
-      paste(file_structure[[g_dataset_id]]$evaluation, "intracluster_distances.csv", sep = "/")
+      paste(file_structure[[g_dataset_id]]$evaluation, "intracluster_distances.tsv", sep = "/")
     
     if(file.exists(intracluster_dist_file)) {
       gene_distances <-
-        read_csv(intracluster_dist_file)
+        read_tsv(intracluster_dist_file)
       
     } else {
       
@@ -663,10 +1037,9 @@ intracluster_distances <-
           
           
         }) %>% 
-        collect() %>% 
         ungroup()
       
-      write_csv(gene_distances, intracluster_dist_file)
+      write_tsv(gene_distances, intracluster_dist_file)
     }
     
     gene_distances %>% 
@@ -680,7 +1053,9 @@ intracluster_distances <-
              max_size = max(n_genes),
              avg_size = mean(n_genes)) %>% 
       ungroup()
-  })
+    
+  }) %>% 
+  collect() 
 
 rm(cluster)
 
@@ -768,9 +1143,6 @@ d2 <- diff(d1) / diff(b$avg_weighted_dist[-1]) # second derivative
 
 knee <- (d2)/((1+(d1)^2)^1.5)
 which.min(knee)
-
-
-
 
 ```
 
