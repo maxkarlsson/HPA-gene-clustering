@@ -33,6 +33,7 @@ library(treemapify)
 library(pbapply)
 library(clusterProfiler)
 library(patchwork)
+library(ggrastr)
 source("scripts/functions_utility.R")
 source("scripts/generate_gene_clusters.R")
 
@@ -674,11 +675,11 @@ heatmap_clustering_data <-
   ungroup()
 
 
-worker_cluster <- new_cluster(n = 5)
-cluster_library(worker_cluster, c("dplyr",
-                           "tidyverse"))
-cluster_copy(worker_cluster, c("file_structure",
-                               "cluster_membconf_data"))
+# worker_cluster <- new_cluster(n = 5)
+# cluster_library(worker_cluster, c("dplyr",
+#                            "tidyverse"))
+# cluster_copy(worker_cluster, c("file_structure",
+#                                "cluster_membconf_data"))
 
 
 heatmap_clustering_data %>% 
@@ -734,7 +735,7 @@ heatmap_clustering_data %>%
       mutate(ensg_id = factor(ensg_id, 
                               rev(gene_hclust$labels[gene_hclust$order]))) %>% 
       ggplot(aes("Confidence", ensg_id, fill = cluster_membership_confidence)) + 
-      geom_tile() +
+      geom_tile_rast() +
       theme_void() +
       scale_fill_gradient(low = "#D1EEEA", high = "#2A5674",
                           limits = c(0.5, 1),
@@ -746,7 +747,7 @@ heatmap_clustering_data %>%
     plot_heat_zscore <- 
       plot_data %>% 
       ggplot(aes(sample_id, ensg_id, fill = tmm_zscore)) +
-      geom_tile() +
+      geom_tile_rast() +
       scale_fill_gradient2(low = "#4575B4", high = "#D73027", mid = "#FFFFFF",
                            name = "Z-score") +
       theme_void() +
@@ -759,7 +760,7 @@ heatmap_clustering_data %>%
     plot_heat_scaled <- 
       plot_data %>% 
       ggplot(aes(sample_id, ensg_id, fill = tmm_scaled)) +
-      geom_tile() +
+      geom_tile_rast() +
       scale_fill_gradient2(low = "#4575B4", high = "#D73027", mid = "#FFFFFF",
                            name = "Relative Expression",
                            breaks = c(0, 0.5, 1),
@@ -804,6 +805,116 @@ heatmap_clustering_data %>%
 rm(worker_cluster)
 ```
 
+```{r}
+# g_cluster_data <<- .
+# g_dataset_id <- unique(g_cluster_data$dataset_id)
+
+
+plot_savename <- 
+  paste0("heatmap original ",
+         unique(g_cluster_data$cluster), 
+         ".svg")
+
+plot_savename_raster <- 
+  paste0("heatmap raster ",
+         unique(g_cluster_data$cluster), 
+         ".svg")
+
+
+g_cluster_data_wide <- 
+  g_cluster_data %>% 
+  select(ensg_id, sample_id, tmm_zscore) %>% 
+  spread(sample_id, tmm_zscore) %>% 
+  column_to_rownames("ensg_id") 
+
+gene_hclust <- 
+  g_cluster_data_wide %>% 
+  dist() %>% 
+  hclust(method = "ward.D2")
+
+sample_hclust <- 
+  g_cluster_data_wide %>%
+  t() %>% 
+  dist() %>% 
+  hclust(method = "ward.D2")
+
+plot_data <- 
+  g_cluster_data %>% 
+  mutate(ensg_id = factor(ensg_id, 
+                          rev(gene_hclust$labels[gene_hclust$order])),
+         sample_id = factor(sample_id, 
+                            sample_hclust$labels[sample_hclust$order])) 
+
+plot_confidence <- 
+  cluster_membconf_data %>%
+  filter(dataset_id == g_dataset_id) %>% 
+  filter(ensg_id %in% gene_hclust$labels) %>% 
+  mutate(ensg_id = factor(ensg_id, 
+                          rev(gene_hclust$labels[gene_hclust$order]))) %>% 
+  ggplot(aes("Confidence", ensg_id, fill = cluster_membership_confidence)) + 
+  geom_tile_rast() +
+  theme_void() +
+  scale_fill_gradient(low = "#D1EEEA", high = "#2A5674",
+                      limits = c(0.5, 1),
+                      breaks = c(0.5, 0.75, 1),
+                      name = "Confidence") +
+  theme(axis.text.x = element_text(angle = -90, face = "bold"), 
+        legend.position = "left")
+
+plot_heat_rast <- 
+  plot_data %>% 
+  ggplot(aes(sample_id, ensg_id, fill = tmm_zscore)) +
+  geom_tile_rast() +
+  scale_fill_gradient2(low = "#4575B4", high = "#D73027", mid = "#FFFFFF",
+                       name = "Z-score") +
+  theme_void() +
+  theme(axis.text.x = element_text(angle = -90,
+                                   hjust = 0, 
+                                   size = 6),
+        legend.position = "top")
+
+plot_heat <- 
+  plot_data %>% 
+  ggplot(aes(sample_id, ensg_id, fill = tmm_zscore)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "#4575B4", high = "#D73027", mid = "#FFFFFF",
+                       name = "Z-score") +
+  theme_void() +
+  theme(axis.text.x = element_text(angle = -90,
+                                   hjust = 0, 
+                                   size = 6),
+        legend.position = "top")
+
+
+
+column_width <- (1/53)
+plot_n <- length(sample_hclust$labels)
+plot_scaling_factor <- column_width * plot_n
+
+plot_widths <- 
+  c(3, plot_n) %>% 
+  {. * column_width} %>% 
+  {. / max(.)}
+
+plot_width <- 
+  1 + 4 * plot_scaling_factor
+
+plot_rast <- 
+  plot_confidence + plot_heat_rast +
+  plot_layout(widths = plot_widths, nrow = 1)
+plot_ <- 
+  plot_confidence + plot_heat +
+  plot_layout(widths = plot_widths, nrow = 1)
+
+ggsave(plot_savename_raster, plot = plot_rast,  
+       width = plot_width, 
+       height = 5)
+ggsave(plot_savename, plot = plot_,
+       width = plot_width, 
+       height = 5)
+
+tibble()
+```
 
 
 # Old
