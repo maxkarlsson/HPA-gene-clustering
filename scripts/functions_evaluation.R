@@ -255,10 +255,6 @@ enrichment_scores <- function(df,grouping) {
     })
 }
 
-enrichment_scores_kmeans <-
-  map(enrichments_kmeans,
-      ~enrichment_scores(df = .x, grouping = "id")) 
-
 
 
 # Find clustering with the best k
@@ -489,5 +485,110 @@ scaled_rank <- function(results,measures) {
     arrange(-avg_value)  
   
 }
+
+
+
+calculate_MI <-
+  function(clustering, GO, nrep = 10, random_simplify = F) {
+    overlap_GO <-
+      GO %>%
+      filter(ensg_id %in% clustering$gene)
+    overlap_clustering <-
+      clustering %>%
+      filter(gene %in% overlap_GO$ensg_id)
+    
+    random_clustering_MI <-
+      overlap_GO %>%
+      group_by(GO_domain) %>%
+      do({
+        domain_GOterms <- .
+        if(random_simplify) {
+          domain_GOterms <-
+            domain_GOterms %>%
+            group_by(ensg_id) %>%
+            summarise(GO_accession = sample(GO_accession, 1)) %>%
+            ungroup()
+        }
+        expand_grid(run = 1:nrep) %>%
+          group_by(run) %>%
+          do({
+            overlap_clustering %>%
+              mutate(cluster = sample(cluster)) %>%
+              inner_join(domain_GOterms,
+                         by = c("gene" = "ensg_id")) %>%
+              summarise(MI = mutinformation(cluster, GO_accession))
+          })
+      }) %>%
+      ungroup()
+
+    random_clustering_MI_specs <-
+      random_clustering_MI %>%
+      group_by(GO_domain) %>%
+      summarise(mean_MI = mean(MI),
+                sd_MI = sd(MI))
+    overlap_clustering_MI <-
+      overlap_GO %>%
+      group_by(GO_domain) %>%
+      do({
+        domain_GOterms <- .
+        if(random_simplify) {
+          domain_GOterms <-
+            domain_GOterms %>%
+            group_by(ensg_id) %>%
+            summarise(GO_accession = sample(GO_accession, 1)) %>%
+            ungroup()
+        }
+        overlap_clustering %>%
+          inner_join(domain_GOterms,
+                     by = c("gene" = "ensg_id")) %>%
+          summarise(MI = mutinformation(cluster, GO_accession))
+      }) %>%
+      ungroup() %>%
+      left_join(random_clustering_MI_specs,
+                by = "GO_domain") %>%
+      mutate(z_score = (MI - mean_MI) / sd_MI)
+    return(overlap_clustering_MI)
+  }
+
+
+
+calculate_MI_reactome <-
+  function(clustering, reactome, nrep = 10) {
+    overlap_R <-
+      reactome %>%
+      filter(ensg_id %in% clustering$gene)
+    overlap_clustering <-
+      clustering %>%
+      filter(gene %in% overlap_R$ensg_id)
+    
+    random_clustering_MI <-
+      expand_grid(run = 1:nrep) %>%
+      group_by(run) %>%
+      do({
+        overlap_clustering %>%
+          mutate(cluster = sample(cluster)) %>%
+          inner_join(overlap_R,
+                     by = c("gene" = "ensg_id")) %>%
+          summarise(MI = mutinformation(cluster, term_id))
+      })%>%
+      ungroup()
+    
+    random_clustering_MI_specs <-
+      random_clustering_MI %>%
+      summarise(mean_MI = mean(MI),
+                sd_MI = sd(MI))
+    
+    overlap_clustering_MI <-
+      overlap_clustering %>%
+      inner_join(overlap_R,
+                 by = c("gene" = "ensg_id")) %>%
+      summarise(MI = mutinformation(cluster, term_id)) %>%
+      ungroup() %>%
+      cbind(random_clustering_MI_specs) %>%
+      mutate(z_score = (MI - mean_MI) / sd_MI)
+    
+    return(overlap_clustering_MI)
+  }
+
 
 
