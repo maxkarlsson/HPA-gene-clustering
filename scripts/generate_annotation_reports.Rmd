@@ -43,19 +43,17 @@ rename <- dplyr::rename
 simplify <- clusterProfiler::simplify
 
 
-
-
 ```
 
 ## File structure
 ```{r}
 
-dataset_metadata <- read_csv("run_settings/20210901_settings.csv")
+dataset_metadata <- read_csv("run_settings/20210914_settings.csv")
 
 file_structure <-
   create_folder_structure(dataset_id = dataset_metadata$dataset_id,
                           dataset_run_id = dataset_metadata$version,
-                          main_folder = "results/Clustering results",
+                          main_folder = "results/Clustering_results",
                           folders = c("data" = "data", 
                                       "svg" = "svg",
                                       "treemap" = "svg/treemap",
@@ -72,9 +70,9 @@ file_structure <-
 clustering_data <- 
   file_structure %>% 
   map(function(x) x$clustering) %>% 
-  map(function(x) read_csv(paste(x, "final_consensus.csv", sep = "/"))) %>% 
+  map(function(x) read_tsv(paste(x, "final_consensus.tsv", sep = "/"))) %>% 
   bind_rows(.id = "dataset_id") %>% 
-  mutate(cluster = as.character(cluster))
+  mutate(cluster = as.character(cluster)) 
 
 
 ```
@@ -250,7 +248,6 @@ database_terms <-
 ```{r}
 
 
-
 worker_cluster <- new_cluster(n = 5)
 cluster_library(worker_cluster, c("dplyr",
                                   "tidyverse"))
@@ -307,7 +304,6 @@ rm(worker_cluster)
 
 
 
-
 ```
 
 
@@ -345,7 +341,6 @@ KEGG_enrichment_res <-
 
 
 rm(worker_cluster)
-
 
 ```
 
@@ -505,7 +500,7 @@ plot_legend <-
 file_structure %>% 
   map(function(x) x$treemap) %>% 
   lapply(function(treemap_path) {
-    ggsave(paste(treemap_path, "treemap legend.svg",
+    ggsave(paste(treemap_path, "treemap_legend.svg",
                  sep = "/"),
            plot = plot_legend,
        width = 1, height = 1)
@@ -513,7 +508,9 @@ file_structure %>%
   
 # Generate plot data for treemaps
 
-
+#ids <- c(rownames(GO_sim[["BP"]]), rownames(GO_sim[["CC"]]), rownames(GO_sim[["MF"]]))
+  
+    
 worker_cluster <- new_cluster(n = 6)
 cluster_library(worker_cluster, c("dplyr",
                                   "tidyverse"))
@@ -530,10 +527,11 @@ plot_data <-
          ontology = str_extract(test_type, "BP|CC|MF")) %>% 
   group_by(ontology, test_type, dataset_id, cluster) %>% 
   filter(n_distinct(ID) >= 2) %>% 
+ # filter(ID %in% ids) %>%  # - 15 rows
   group_by(ontology, test_type, dataset_id, cluster) %>% 
   partition(worker_cluster) %>% 
   do({
-    g_data <<- .
+    g_data <- .
     
     sim_mat <- 
       GO_sim[[unique(g_data$ontology)]][g_data$ID,
@@ -548,7 +546,6 @@ plot_data <-
     
     
   }) %>% 
-  
   ungroup() %>% 
   collect()
 
@@ -557,12 +554,12 @@ rm(worker_cluster)
 plot_data %>% 
   group_by(dataset_id, cluster) %>% 
   do({
-    g_data <<- .
+    g_data <- .
     
     treemap_savefile <- 
       paste0(file_structure[[unique(g_data$dataset_id)]]$treemap,
              "/",
-             "treemap ", 
+             "treemap_", 
              unique(g_data$cluster),
              ".svg")
     
@@ -574,16 +571,18 @@ plot_data %>%
 plot_settings <-
   plot_data %>% 
   select(dataset_id, cluster) %>% 
-  arrange(dataset_id, as.numeric(cluster)) %>% 
+  mutate(cluster = as.numeric(cluster)) %>% 
+  arrange(dataset_id, cluster) %>% 
   distinct() %>% 
+  ungroup() %>% 
   mutate(i = row_number(), 
          treemap_folder = file_structure[dataset_id] %>% 
            map(function(x) x$treemap) %>% 
            unlist(),
          treemap_savefile = paste0(treemap_folder,
                                    "/",
-                                   "treemap ", 
-                                   unique(cluster),
+                                   "treemap_", 
+                                   cluster,
                                    ".svg"))
 
 plots <- 
@@ -636,21 +635,37 @@ for(i in plot_settings$i) {
          width = 6, height = 4)
 }
 
-
-
 ```
 
 ## Heatmaps
 
 ```{r}
-cluster_membconf_data <- 
+# cluster_membconf_data <- 
+#   clustering_data %>% 
+#   # filter(dataset_id == "tissue") %>% 
+#   select(dataset_id, ensg_id = gene, cluster) %>% 
+#   mutate(cluster_membership_confidence = rnorm(nrow(.), 0.95, 0.05),
+#          cluster_membership_confidence = ifelse(cluster_membership_confidence > 1, 
+#                                                 1, 
+#                                                 round(cluster_membership_confidence, 2)))
+# 
+
+
+cluster_membconf_data <-
   clustering_data %>% 
-  # filter(dataset_id == "tissue") %>% 
-  select(dataset_id, ensg_id = gene, cluster) %>% 
-  mutate(cluster_membership_confidence = rnorm(nrow(.), 0.95, 0.05),
-         cluster_membership_confidence = ifelse(cluster_membership_confidence > 1, 
-                                                1, 
-                                                round(cluster_membership_confidence, 2)))
+  group_by(dataset_id) %>% 
+  do({
+    g_data <- .
+    g_dataset_id <- unique(g_data$dataset_id)
+    
+    membership_file <- 
+      paste(file_structure[[g_dataset_id]]$clustering, "cluster_memberships.tsv", sep = "/")
+    
+      read_tsv(membership_file) %>% 
+        as_tibble() %>% 
+        rename(cluster_membership_confidence =  membership,
+               ensg_id = gene) 
+  })
 
 heatmap_palette <- 
   colorRampPalette(c("white", "orangered"))(100)
@@ -675,31 +690,31 @@ heatmap_clustering_data <-
   ungroup()
 
 
-# worker_cluster <- new_cluster(n = 5)
-# cluster_library(worker_cluster, c("dplyr",
-#                            "tidyverse"))
-# cluster_copy(worker_cluster, c("file_structure",
-#                                "cluster_membconf_data"))
+worker_cluster <- new_cluster(n = 5)
+cluster_library(worker_cluster, c("dplyr",
+                           "tidyverse"))
+cluster_copy(worker_cluster, c("file_structure",
+                               "cluster_membconf_data"))
 
 
 heatmap_clustering_data %>% 
-  # filter(cluster %in% 1:10) %>%
-  group_by(dataset_id, cluster) %>% 
-  # partition(worker_cluster) %>%
+  group_by(dataset_id, cluster) %>%  
+  partition(worker_cluster) %>%
   do({
-    g_cluster_data <<- .
+    g_cluster_data <- .
+    
     g_dataset_id <- unique(g_cluster_data$dataset_id)
     
     
     plot_savename_zscore <- 
       paste0(file_structure[[g_dataset_id]]$heatmap, "/",
-             "heatmap zscore ",
+             "heatmap_zscore_",
              unique(g_cluster_data$cluster), 
              ".svg")
     
     plot_savename_scaled <- 
       paste0(file_structure[[g_dataset_id]]$heatmap, "/",
-             "heatmap scaled ",
+             "heatmap_scaled_",
              unique(g_cluster_data$cluster), 
              ".svg")
     
@@ -732,18 +747,19 @@ heatmap_clustering_data %>%
       cluster_membconf_data %>%
       filter(dataset_id == g_dataset_id) %>% 
       filter(ensg_id %in% gene_hclust$labels) %>% 
+      filter(cluster == unique(g_cluster_data$cluster)) %>% #-> addition to filter memberships for other clusters
       mutate(ensg_id = factor(ensg_id, 
                               rev(gene_hclust$labels[gene_hclust$order]))) %>% 
       ggplot(aes("Confidence", ensg_id, fill = cluster_membership_confidence)) + 
       geom_tile_rast() +
       theme_void() +
       scale_fill_gradient(low = "#D1EEEA", high = "#2A5674",
-                          limits = c(0.5, 1),
+                          limits = c(0.2, 1), # before limit to 0.5
                           breaks = c(0.5, 0.75, 1),
                           name = "Confidence") +
       theme(axis.text.x = element_text(angle = -90, face = "bold"), 
             legend.position = "left")
-    
+      
     plot_heat_zscore <- 
       plot_data %>% 
       ggplot(aes(sample_id, ensg_id, fill = tmm_zscore)) +
@@ -803,6 +819,7 @@ heatmap_clustering_data %>%
   collect()
 
 rm(worker_cluster)
+
 ```
 
 ```{r}
