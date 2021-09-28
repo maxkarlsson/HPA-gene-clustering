@@ -1,0 +1,6 @@
+dataset_id,dataset,type,additional_heatmap,version
+tissue,tissue,region,,testv4
+brain,brain,tissue,region,testv4
+blood,blood,sample,consensus,testv4
+celline_consensus,celline,consensus,,testv4
+singlecell,singlecell,sample,consensus,testv4
