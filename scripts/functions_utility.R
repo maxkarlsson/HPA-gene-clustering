@@ -362,7 +362,7 @@ create_folder_structure <-
       tibble(dataset_id,
              dataset_run_id,
              dataset_path = paste0(main_folder, "/",
-                                   dataset_id, " ",
+                                   dataset_id, "_",
                                    dataset_run_id))
     for(path in dataset_folder$dataset_path) dir.create(path, showWarnings = FALSE)
     folders_df <-
