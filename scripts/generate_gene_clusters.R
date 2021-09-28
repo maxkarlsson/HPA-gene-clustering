@@ -472,49 +472,174 @@ df_to_vector <- function(cluster_df) {
   return(v)
 }
 
+# find_consensus <- function(all_clusterings, id, get_membership = F, runs = 1) {
+#   
+#   # Use the median cluster size as the consensus cluster size
+#   k <- 
+#     all_clusterings %>% 
+#     select(id = id, 
+#            cluster) %>% 
+#     group_by(id) %>% 
+#     summarise(n = n_distinct(cluster)) %>% 
+#     pull(n) %>% 
+#     median() %>% 
+#     ceiling()
+#   
+#   # Format clusters and calculate consensus (clue)
+#   clusters <- 
+#     all_clusterings %>% 
+#     select(id = id, 
+#            gene,
+#            cluster) %>% 
+#     group_split(id) %>% 
+#     map(to_cluster) %>%  
+#     map(~as.cl_partition(.x))
+#   
+#   set.seed(1)
+#   #t <- Sys.time()
+#   cons_clustering <- cl_consensus(clusters, 
+#                                   method = "SE", 
+#                                   control = list(k = k, 
+#                                                  nruns = runs, 
+#                                                  verbose = FALSE)) 
+#   
+#  # cons_clustering <- cl_medoid(clusters, method = "euclidean")
+#   
+#   #Sys.time() - t
+#   
+#   final_clustering <- cl_class_ids(cons_clustering) %>% enframe(name = "gene", value ="cluster")
+#   #cons_clusters <- unname(cl_class_ids(cons_clustering)) %>% sort() %>% unique() 
+#   
+#   #final_clusters <- c(1:length(cons_clusters))
+#                             
+#              
+#   #mapping_table <-  data.frame(cluster_cons = cons_clusters,
+#                #                cluster = final_clusters)
+#   
+#   #final_clustering <- data.frame(gene = names(cl_class_ids(cons_clustering)), 
+#    #                              cluster_cons = as.numeric(cl_class_ids(cons_clustering))) %>% 
+#   #  left_join(mapping_table) %>% 
+#    # select(-cluster_cons)
+#   
+#   
+#   if (get_membership) {
+#     # Extract cluster membership matrix 
+#     cons_matrix <- 
+#       cons_clustering$.Data[,] %>% 
+#       as_tibble(rownames = "gene") %>% 
+#       gather(cluster, membership, -1) %>% 
+#       filter(membership > 0) %>% 
+#       mutate(cluster = as.numeric(gsub("V", "", cluster))) #%>% 
+#    #   rename(cluster_cons = cluster) %>% 
+#   #    left_join(mapping_table) %>% 
+#  #     select(-cluster_cons)
+#     
+#     return(list(consensus_clustering = final_clustering, 
+# #                mapping_table = mapping_table,
+#                 membership_matrix = cons_matrix ))
+#   } else {
+#     #return(list(consensus_clustering = final_clustering, 
+#     #           mapping_table = mapping_table))
+#     
+#     return(final_clustering)
+#   }
+# }
+# 
 
-find_consensus <- function(all_clusterings, id, get_membership = F, runs = 1) {
+###
+
+
+find_consensus <- function(all_clusterings, n, get_membership = F, runs = 1) {
   
-  # Use the median cluster size as the consensus cluster size
-  k <- 
+  ensemble <- lapply(c(1:n), function(x)
     all_clusterings %>% 
-    select(id = id, 
-           cluster) %>% 
-    group_by(id) %>% 
-    summarise(n = n_distinct(cluster)) %>% 
-    pull(n) %>% 
+      select(gene, paste("seed_", x, sep = "")) %>% 
+      deframe() %>% 
+      as.cl_partition
+  ) %>% 
+    as.cl_ensemble()
+  
+  num_clusters <- lapply(c(1:n), function(x)
+    all_clusterings %>% 
+      pull(paste("seed_", x, sep = "")) %>% 
+      max()) 
+  
+  k <- as.numeric(num_clusters) %>% 
     median() %>% 
-    ceiling()
-  
-  # Format clusters and calculate consensus (clue)
-  clusters <- 
-    all_clusterings %>% 
-    select(id = id, 
-           gene,
-           cluster) %>% 
-    group_split(id) %>% 
-    map(to_cluster) %>%  
-    map(~as.cl_partition(.x))
+    floor()
   
   set.seed(1)
-  cons_clustering <- cl_consensus(clusters, 
+  
+  cons_clustering <- cl_consensus(ensemble, 
                                   method = "SE", 
                                   control = list(k = k, 
                                                  nruns = runs, 
                                                  verbose = FALSE)) 
+  final_clustering <- 
+    cl_class_ids(cons_clustering) %>% 
+    enframe(name = "gene", value ="cluster")
   
-  cons_clusters <- as.numeric(cl_class_ids(cons_clustering)) %>% unique() %>% sort()
-  final_clusters <- c(1:length(cons_clusters))
-                            
-             
-  mapping_table <-  data.frame(cluster_cons = cons_clusters,
-                               cluster = final_clusters)
+  empty_clusters <- 
+    final_clustering %>% 
+    group_by(cluster) %>% 
+    mutate(size = n_distinct(gene)) %>% 
+    filter(size < 5) %>% 
+    select(-size) %>% 
+    mutate(cluster = as.numeric(cluster)) 
   
-  final_clustering <- data.frame(gene = names(cl_class_ids(cons_clustering)), 
-                                 cluster_cons = as.numeric(cl_class_ids(cons_clustering))) %>% 
-    left_join(mapping_table) %>% 
-    select(-cluster_cons)
-  
+  if(dim(empty_clusters)[1] != 0) {
+    to_rename <- 
+      empty_clusters %>% 
+      group_by(gene) %>% 
+      do({
+        current <- .
+        
+        probabilities <- 
+          cons_clustering$.Data[,] %>% 
+          as_tibble(rownames = "gene") %>% 
+          filter(gene == current$gene) %>% 
+          select(-gene) %>% 
+          gather(cluster,probability) %>% 
+          arrange(-probability) %>% 
+          mutate(cluster = as.numeric(sub("V", "", cluster))) %>% 
+          filter(cluster != current$cluster)
+        data.frame(gene = current$gene, 
+                   new_cluster = probabilities[[1,1]])
+      })
+    
+    final_clustering_corrected <- 
+      final_clustering %>% 
+      mutate(cluster = as.numeric(cluster)) %>% 
+      left_join(to_rename) %>% 
+      mutate(new_cluster = if_else(is.na(new_cluster), cluster, new_cluster))
+    
+    
+    mapping_table <- 
+      final_clustering_corrected %>% 
+      select(new_cluster) %>% 
+      distinct() %>% 
+      arrange(new_cluster) %>% 
+      rownames_to_column("renumbered_cluster")
+    
+    final_clustering <- 
+      final_clustering_corrected %>% 
+      left_join(mapping_table) %>% 
+      select(-new_cluster) %>% 
+      rename(cons_cluster = cluster,
+             cluster = renumbered_cluster) %>% 
+      mutate(cluster = as.character(cluster),
+             cons_cluster = as.character(cons_cluster))
+    
+  } else {
+    final_clustering <- final_clustering %>% 
+      mutate(cluster = as.character(cluster), 
+             cons_cluster = as.character(cluster))
+    
+    mapping_table <- 
+      data.frame(renumbered_cluster = final_clustering$cluster,
+                 new_cluster = final_clustering$cluster) %>% 
+      distinct()
+  }
   
   if (get_membership) {
     # Extract cluster membership matrix 
@@ -523,16 +648,15 @@ find_consensus <- function(all_clusterings, id, get_membership = F, runs = 1) {
       as_tibble(rownames = "gene") %>% 
       gather(cluster, membership, -1) %>% 
       filter(membership > 0) %>% 
-      mutate(cluster = as.numeric(gsub("V", "", cluster))) %>% 
-      rename(cluster_cons = cluster) %>% 
-      left_join(mapping_table) %>% 
-      select(-cluster_cons)
+      mutate(cluster = as.character(gsub("V", "", cluster))) %>% 
+      rename(cons_cluster = cluster) %>% 
+      left_join(mapping_table %>% rename(cons_cluster = renumbered_cluster,
+                                         cluster = new_cluster)) #%>% 
+   #   select(-cluster_cons)
     
     return(list(consensus_clustering = final_clustering, 
-                mapping_table = mapping_table,
                 membership_matrix = cons_matrix ))
   } else {
-    return(list(consensus_clustering = final_clustering, 
-                mapping_table = mapping_table))
+    return(final_clustering)
   }
 }
