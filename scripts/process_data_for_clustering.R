@@ -73,5 +73,10 @@ processed_data <-
   })
 
 
+processed_data %>% 
+  map(. %>% 
+        select(-1) %>% 
+        ncol())
+
 saveRDS(processed_data, "data/processed/combined_HPA_expression_data.RDS")
 
