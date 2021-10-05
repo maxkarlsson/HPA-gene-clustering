@@ -1,0 +1,9 @@
+dataset_id,type,filename
+blood,sample,bloodcells_hpa_all_samples_gene_tpm_103.tsv
+blood,consensus,consensus_bloodcells_hpa_103.tsv
+brain,tissue,consensus_brain_tissues_103.tsv
+brain,region,consensus_brain_103.tsv
+tissue,region,region_aggregated_tissue_103.tsv
+celline,consensus,proteinatlas_celline_hpa_103.tsv
+singlecell,sample,sc_cluster_data.tsv
+singlecell,consensus,

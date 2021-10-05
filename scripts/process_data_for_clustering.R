@@ -8,7 +8,7 @@ data_path <-
   "data/expression_data/HPA21_E103/"
 
 dataset_path_file <- 
-  "run_settings/20210928 all_datasets.csv"
+  "run_settings/20211005 all_datasets.csv"
 
 
 dataset_paths <- 
@@ -39,6 +39,10 @@ processing_functions <-
          spread(sample, ntpm),
        celline_consensus = . %>% 
          select(ensg_id, sample = celline, ntpm) %>%
+         spread(sample, ntpm),
+       singlecell_sample = . %>% 
+         select(ensg_id, assay_id, cluster_id, ntpm) %>% 
+         unite(sample, assay_id, cluster_id) %>% 
          spread(sample, ntpm))
 
 
@@ -53,6 +57,7 @@ all_data <-
   select(id, full_path) %>% 
   deframe() %>% 
   lapply(read_tsv)
+
 
 processed_data <- 
   all_data %>%
