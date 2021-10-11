@@ -50,7 +50,7 @@ simplify <- clusterProfiler::simplify
 
 dataset_metadata <- read_csv("run_settings/20210928_settings.csv")
 
-data_paths <- read_csv("run_settings/20210928 all_datasets.csv")
+data_paths <- read_csv("run_settings/20211005 all_datasets.csv")
 
 file_structure <-
   create_folder_structure(dataset_id = dataset_metadata$dataset_id,
@@ -58,6 +58,7 @@ file_structure <-
                           main_folder = "results/Clustering_results",
                           folders = c("data" = "data", 
                                       "svg" = "svg",
+                                      "bubbleheatmap" = "svg/bubble",
                                       "treemap" = "svg/treemap",
                                       "heatmap" = "svg/heatmap",
                                       "enrichment" = "enrichment",
@@ -106,7 +107,7 @@ gene_info <-
 ```{r}
 
 enrichment_settings <- 
-  read_csv("run_settings/20210930_enrichment_settings.csv")
+  read_csv("run_settings/20211008_enrichment_settings.csv")
 
 
 enrichment_settings_versions <- 
@@ -121,13 +122,13 @@ GO_formatting_function <-
   select(ensg_id = `Gene stable ID`,
          term = `GO term name`,
          term_id = `GO term accession`) %>% 
-         filter(!is.na(term)) %>% 
+  filter(!is.na(term)) %>% 
   distinct() %>% 
   filter(ensg_id %in% clustering_data$gene) %>% 
   group_by(term_id, term) %>% 
   filter(n_distinct(ensg_id) >= 8) %>% 
   ungroup()
-       
+
 HPAspecificity_formatting_function <- 
   . %>% 
   select(ensg_id,
@@ -138,8 +139,8 @@ HPAspecificity_formatting_function <-
   filter(!is.na(term)) %>% 
   mutate(term_id = term)
 
-  
-  
+
+
 database_formatting_functions <- 
   list(secretome_location = . %>% 
          select(ensg_id = Ensembl,
@@ -150,6 +151,7 @@ database_formatting_functions <-
        specificity_blood = HPAspecificity_formatting_function,
        specificity_brain = HPAspecificity_formatting_function,
        specificity_tissue = HPAspecificity_formatting_function,
+       specificity_celline = HPAspecificity_formatting_function,
        
        specificity_singlecell = . %>% 
          select(ensg_id = Ensembl,
@@ -215,8 +217,6 @@ gene_formatting_functions <-
                      select(ensg_id, gene_name),
                    by = c("gene_name")) %>% 
          select(ensg_id, term, term_id))
-  
-
 
 
 
@@ -243,10 +243,10 @@ database_terms <-
       out_db <- 
         out_db %>%
         gene_format_function()
-        
+      
     }
     
-    stopifnot(names(out_db) == c("ensg_id", "term", "term_id")) 
+    stopifnot(all(names(out_db) == c("ensg_id", "term", "term_id")))
     
     out_db
     
@@ -307,8 +307,8 @@ KEGG_enrichment_res <-
   }) %>% 
   ungroup() %>% 
   collect()
-      
-    
+
+
 
 
 rm(worker_cluster)
@@ -347,7 +347,7 @@ rm(worker_cluster)
 ### -------------------
 worker_cluster <- new_cluster(n = 5)
 cluster_library(worker_cluster, c("dplyr",
-                           "tidyverse"))
+                                  "tidyverse"))
 cluster_copy(worker_cluster, c("enricher"))
 
 database_enrichment_res <- 
@@ -390,7 +390,7 @@ database_enrichment_res <-
     
   }) %>% 
   ungroup()
-  
+
 rm(worker_cluster)
 
 ```
@@ -413,35 +413,49 @@ GO_sim <-
              
              calculateSimMatrix(GO_terms, 
                                 orgdb = "org.Hs.eg.db",
+                                keytype = "ENSEMBL",
                                 ont = str_extract(ont_, "BP|CC|MF"),
                                 method = "Wang")
            })
 
+
+GO_sim_terms <- 
+  GO_sim %>% 
+  map(. %>% 
+        colnames() %>% 
+        enframe()) %>% 
+  bind_rows() %>% 
+  pull(value)
 
 worker_cluster <- new_cluster(n = 6)
 cluster_library(worker_cluster, c("dplyr",
                                   "tidyverse"))
 cluster_copy(worker_cluster, c("GO_sim", 
                                "reduceSimMatrix"))
+
+
 simplified_GO_res <- 
   database_enrichment_res %>%
   filter(id %in% c("GO_BP_original",
                    "GO_CC_original", 
                    "GO_MF_original")) %>% 
+  filter(ID %in% GO_sim_terms) %>% 
   mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
            as.numeric(gsub(".*\\/", "", GeneRatio)),
          ontology = str_extract(id, "BP|CC|MF")) %>% 
   group_by(ontology, id, dataset_id, cluster) %>% 
   filter(n_distinct(ID) >= 2) %>% 
- # filter(ID %in% ids) %>%  # - 15 rows
   group_by(ontology, id, dataset_id, cluster) %>% 
-  partition(worker_cluster) %>% 
+  partition(worker_cluster) %>%
   do({
-    g_data <- .
+    g_data <<- .
+    
+    g_terms <- 
+      g_data$ID[which(g_data$ID %in% colnames(GO_sim[[unique(g_data$ontology)]]))]
     
     sim_mat <- 
-      GO_sim[[unique(g_data$ontology)]][g_data$ID,
-                                        g_data$ID]
+      GO_sim[[unique(g_data$ontology)]][g_terms,
+                                        g_terms]
     
     sim_mat %>%
       reduceSimMatrix(setNames(-log10(g_data$p.adjust), g_data$ID),
@@ -510,7 +524,7 @@ all_res <-
                                      Description2, 
                                      Description)) %>% 
          select(-Description2)) %>% 
-    bind_rows() %>% 
+  bind_rows() %>% 
   mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
            as.numeric(gsub(".*\\/", "", GeneRatio)),
          BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
@@ -520,7 +534,7 @@ all_res <-
               select(test_type = id,
                      test_description = description, 
                      database_version = version)) %>% 
-
+  
   select(dataset_id, test_type, test_description, database_version, 
          cluster, ID, Description,
          GeneRatio, GeneFrac, BgRatio, BgFrac, odds_ratio, everything()) 
@@ -581,9 +595,9 @@ file_structure %>%
     ggsave(paste(treemap_path, "treemap_legend.svg",
                  sep = "/"),
            plot = plot_legend,
-       width = 1, height = 1)
+           width = 1, height = 1)
   })
-  
+
 # Generate plot data for treemaps
 
 # plot_data %>% 
@@ -656,7 +670,7 @@ plots <-
                
                scale_fill_identity() +
                theme_void() 
-               
+             
            })
 
 
@@ -694,10 +708,10 @@ cluster_membconf_data <-
     membership_file <- 
       paste(file_structure[[g_dataset_id]]$clustering, "cluster_memberships.tsv", sep = "/")
     
-      read_tsv(membership_file) %>% 
-        as_tibble() %>% 
-        rename(cluster_membership_confidence =  membership,
-               ensg_id = gene) 
+    read_tsv(membership_file) %>% 
+      as_tibble() %>% 
+      rename(cluster_membership_confidence =  membership,
+             ensg_id = gene) 
   })
 
 heatmap_palette <- 
@@ -705,7 +719,7 @@ heatmap_palette <-
 
 heatmap_data <-
   readRDS("data/processed/combined_HPA_expression_data.RDS")
-  
+
 heatmap_settings <- 
   dataset_metadata %>%
   select(dataset_id, heatmap = type, additional_heatmap) %>% 
@@ -733,11 +747,11 @@ heatmap_data_scaled <-
              by = c("dataset_id",
                     "ensg_id" = "gene")) %>% 
   left_join(heatmap_settings)
-      
-    
+
+
 worker_cluster <- new_cluster(n = 5)
 cluster_library(worker_cluster, c("dplyr",
-                           "tidyverse"))
+                                  "tidyverse"))
 cluster_copy(worker_cluster, c("file_structure",
                                "cluster_membconf_data"))
 
@@ -811,7 +825,7 @@ heatmap_data_scaled %>%
                           name = "Confidence") +
       theme(axis.text.x = element_text(angle = -90, face = "bold"), 
             legend.position = "left")
-      
+    
     plot_heat_zscore <- 
       plot_data %>% 
       ggplot(aes(sample, ensg_id, fill = value_zscore)) +
@@ -838,7 +852,7 @@ heatmap_data_scaled %>%
                                        hjust = 0,
                                        size = 6),
             legend.position = "top")
-      
+    
     column_width <- (1/53)
     plot_n <- length(sample_hclust$labels)
     plot_scaling_factor <- column_width * plot_n
@@ -873,4 +887,191 @@ heatmap_data_scaled %>%
 rm(worker_cluster)
 
 ```
+
+## Bubble heatmaps
+
+
+```{r}
+
+bubble_heatmap_settings <- 
+  all_res %>%
+  filter(!test_type %in% c("KEGG",
+                           "GO_BP_original",
+                           "GO_CC_original",
+                           "GO_MF_original",
+                           "GO_BP_simplified",
+                           "GO_CC_simplified",
+                           "GO_MF_simplified",
+                           "reactome")) %>% 
+  group_by(dataset_id, test_type) %>% 
+  summarise(bubbles = length(ID),
+            clusters = n_distinct(cluster),
+            terms = n_distinct(Description)) %>% 
+  ungroup() %>% 
+  mutate(i = row_number(), 
+         bubble_folder = file_structure[dataset_id] %>% 
+           map(function(x) x$bubbleheatmap) %>% 
+           unlist(),
+         bubble_savefile = paste0(bubble_folder,
+                                  "/",
+                                  "bubble_", 
+                                  test_type,
+                                  ".svg"))
+
+plot_data_all <- 
+  all_res %>% 
+  group_by_all() %>% 
+  mutate(capped_odds_ratio = min(c(odds_ratio,
+                                   50))) %>% 
+  ungroup()
+
+cluster_levels <- 
+  clustering_data %>% 
+  select(dataset_id, cluster) %>% 
+  distinct() %>% 
+  arrange(dataset_id, as.numeric(cluster)) 
+
+
+plot_size_range <- c(1, 4)
+
+plot_legend_settings <- 
+  tibble(odds_ratio_str = c(1, 10, 20, 30, 40, ">50"),
+         y = 1:6,
+         odds_ratio = c(1, 10, 20, 30, 40, 50)) 
+
+plot_legend <-
+  plot_legend_settings %>% 
+  ggplot(aes(1, y, 
+             size = odds_ratio,
+             fill = odds_ratio,
+             label = odds_ratio_str)) +
+  geom_point(shape = 21,
+             show.legend = F) +
+  geom_text(size = 4, 
+            hjust = 0,
+            nudge_x = 0.1) +
+  annotate("text", x = 1, y = 7, label = "Odds ratio",
+           fontface = "bold", hjust = 0) +
+  scale_x_continuous(limits = c(0, 2)) +
+  scale_y_continuous(limits = c(0, 7)) +
+  scale_fill_gradient(name = "Odds ratio",
+                      low = "white", high = "orangered",
+                      breaks = plot_legend_settings$odds_ratio,
+                      limits = range(plot_legend_settings$odds_ratio)) + 
+  scale_size_continuous(name = "Odds ratio", 
+                        range = plot_size_range, 
+                        breaks = plot_legend_settings$odds_ratio,
+                        limits = range(plot_legend_settings$odds_ratio)) +
+  theme_void()
+
+for(folder_ in unique(bubble_heatmap_settings$bubble_folder)) {
+  ggsave(paste0(folder_, "/legend.svg"),
+         plot = plot_legend,
+         width = 2, 
+         height = 2)
+} 
+
+plots <- 
+  pblapply(1:nrow(bubble_heatmap_settings), 
+           function(i) {
+             i <<- i
+             dataset_id_ <- 
+               bubble_heatmap_settings$dataset_id[i]
+             test_type_ <- 
+               bubble_heatmap_settings$test_type[i]
+             filename <- 
+               bubble_heatmap_settings$bubble_savefile[i]
+             
+             plot_data <- 
+               plot_data_all %>% 
+               filter(dataset_id == dataset_id_,
+                      test_type == test_type_) %>% 
+               mutate(cluster = paste0("cluster_", cluster, "_"))
+             
+             plot_levels <-
+               cluster_levels %>% 
+               mutate(cluster = paste0("cluster_", cluster, "_")) %>% 
+               filter(dataset_id == dataset_id_) %>% 
+               pull(cluster)
+             
+             plot_clustering <- 
+               plot_data %>% 
+               select(cluster, ID, odds_ratio) %>% 
+               spread(ID, odds_ratio, fill = 0) %>% 
+               column_to_rownames("cluster") %>%
+               list(tissue = t(.), 
+                    cluster = .) %>%
+               map(. %>% 
+                     dist(method = "binary") %>% 
+                     hclust(method = "ward.D2"))
+             
+             plot_order <- 
+               list(cluster = unique(c(with(plot_clustering$cluster,
+                                            labels[order]),
+                                       plot_levels)),
+                    ID = with(plot_clustering$tissue,
+                              labels[order]))
+             
+             plot <-
+               plot_data %>%
+               ungroup() %>% 
+               mutate(cluster = factor(cluster,
+                                       plot_order$cluster),
+                      ID = factor(ID,
+                                  plot_order$ID)) %>%
+               ggplot(aes(ID, cluster, 
+                          size = capped_odds_ratio, 
+                          fill = capped_odds_ratio)) +
+               geom_point(data = expand_grid(cluster = plot_order$cluster,
+                                             ID = plot_order$ID) %>% 
+                            mutate(cluster = factor(cluster, unique(cluster)),
+                                   ID = factor(ID, unique(ID))),
+                          fill = NA,
+                          size = NA) +
+               geom_point(shape = 21,
+                          show.legend = F) +
+               theme_bw() +
+               theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust = 0.5),
+                     legend.position = "right") +
+               # coord_fixed() +
+               scale_fill_gradient(name = "Odds ratio",
+                                   low = "white", high = "orangered",
+                                   breaks = plot_legend_settings$odds_ratio,
+                                   limits = range(plot_legend_settings$odds_ratio)) + 
+               scale_size_continuous(name = "Odds ratio", 
+                                     range = plot_size_range, 
+                                     breaks = plot_legend_settings$odds_ratio,
+                                     limits = range(plot_legend_settings$odds_ratio)) +
+               theme(axis.title = element_blank(), 
+                     plot.margin = unit(c(0,0,0,200), "pt")) + 
+               coord_fixed()
+             
+             column_width <- (1/30)#(1/53)
+             plot_n <- length(plot_order$ID)
+             plot_scaling_factor_row <- column_width * plot_n
+             
+             plot_n_col <- length(plot_order$cluster)
+             plot_scaling_factor_col <- column_width * plot_n_col
+             
+             # 
+             # plot_widths <- 
+             #   c(3, length(plot_n)) %>% 
+             #   {. * column_width} %>% 
+             #   {. / max(.)}
+             
+             plot_width <- 
+               4 + 4 * plot_scaling_factor_row
+             plot_height <- 
+               2 + 4 * plot_scaling_factor_col
+             
+             ggsave(filename,
+                    plot = plot,
+                    width = plot_width, height = plot_height)
+             
+           })
+
+
+
+```
+
 
