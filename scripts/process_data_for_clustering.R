@@ -8,7 +8,7 @@ data_path <-
   "data/expression_data/HPA21_E103/"
 
 dataset_path_file <- 
-  "run_settings/20211005 all_datasets.csv"
+  "run_settings/20211012 all_datasets.csv"
 
 
 dataset_paths <- 
@@ -41,9 +41,9 @@ processing_functions <-
          select(ensg_id, sample = celline, ntpm) %>%
          spread(sample, ntpm),
        singlecell_sample = . %>% 
-         select(ensg_id, assay_id, cluster_id, ntpm) %>% 
-         unite(sample, assay_id, cluster_id) %>% 
-         spread(sample, ntpm))
+         spread(sample, ntpm),
+       singlecell_consensus = . %>% 
+         spread(cell_type_name, exp))
 
 
 ##########
@@ -65,8 +65,6 @@ processed_data <-
   set_names(., .) %>% 
   lapply(function(id) {
     
-    # id <<- id
-    
     one_dataset <- 
       all_data[[id]]
     
@@ -82,6 +80,7 @@ processed_data %>%
   map(. %>% 
         select(-1) %>% 
         ncol())
+
 
 saveRDS(processed_data, "data/processed/combined_HPA_expression_data.RDS")
 
