@@ -107,7 +107,7 @@ gene_info <-
 ```{r}
 
 enrichment_settings <- 
-  read_csv("run_settings/20211008_enrichment_settings.csv")
+  read_csv("run_settings/20211013_enrichment_settings.csv")
 
 
 enrichment_settings_versions <- 
@@ -137,9 +137,8 @@ HPAspecificity_formatting_function <-
   separate_rows(term, sep = ",") %>% 
   mutate(term = gsub(";", ", ", term)) %>% 
   filter(!is.na(term)) %>% 
-  mutate(term_id = term)
-
-
+  mutate(term = trimws(term), 
+         term_id = term)
 
 database_formatting_functions <- 
   list(secretome_location = . %>% 
@@ -152,15 +151,7 @@ database_formatting_functions <-
        specificity_brain = HPAspecificity_formatting_function,
        specificity_tissue = HPAspecificity_formatting_function,
        specificity_celline = HPAspecificity_formatting_function,
-       
-       specificity_singlecell = . %>% 
-         select(ensg_id = Ensembl,
-                term = `RNA single cell type specific NX`) %>% 
-         separate_rows(term, sep = ";") %>% 
-         mutate(term = gsub(":.*", "", term)) %>% 
-         filter(!is.na(term)) %>% 
-         filter(ensg_id %in% clustering_data$gene) %>% 
-         mutate(term_id = term),
+       specificity_singlecell = HPAspecificity_formatting_function,
        
        subcellular_location = . %>% 
          filter(Gene %in% clustering_data$gene) %>% 
@@ -217,7 +208,6 @@ gene_formatting_functions <-
                      select(ensg_id, gene_name),
                    by = c("gene_name")) %>% 
          select(ensg_id, term, term_id))
-
 
 
 database_terms <- 
