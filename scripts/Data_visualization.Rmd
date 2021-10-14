@@ -17,6 +17,7 @@ editor_options:
 
 library(tidyverse)
 library(pbapply)
+library(plotly)
 source("scripts/functions_utility.R")
 
 select <- dplyr::select
@@ -29,7 +30,7 @@ select <- dplyr::select
 
 dataset_metadata <- read_csv("run_settings/20210928_settings.csv")
 
-data_paths <- read_csv("run_settings/20210928 all_datasets.csv")
+data_paths <- read_csv("run_settings/20211012 all_datasets.csv")
 
 file_structure <-
   create_folder_structure(dataset_id = dataset_metadata$dataset_id,
@@ -37,6 +38,7 @@ file_structure <-
                           main_folder = "results/Clustering_results",
                           folders = c("data" = "data", 
                                       "svg" = "svg",
+                                      "UMAP" = "UMAP",
                                       "treemap" = "svg/treemap",
                                       "heatmap" = "svg/heatmap",
                                       "enrichment" = "enrichment",
@@ -90,11 +92,151 @@ enrichment_data <-
 ```{r}
 
 cluster_annotation <- 
-  list(tissue = read_csv("data/temp/annotation_tissue_HPA21v1.csv"),
-       blood = read_csv("data/temp/annotation_blood_HPA21v1.csv")) %>% 
+  list(tissue = read_csv("data/annotation/Tissue 20211013.csv"),
+       blood = read_csv("data/annotation/Blood 20211013.csv"),
+       celline = read_csv("data/annotation/Celline 20211013.csv"),
+       brain = read_csv("data/annotation/Brain 20211013.csv")) %>% 
   bind_rows(.id = "dataset_id") %>% 
-  mutate(cluster = as.character(cluster))
+  rename(dataset_id = 1,
+         cluster = 2,
+         n_genes = 3,
+         ann_specificity = 5, 
+         ann_function = 6,
+         reliability = 7,
+         external_comment = 8,
+         internal_comment = 9) %>% 
+  mutate(cluster = as.character(cluster),
+         full_annotation = paste(ann_specificity, 
+                                 ann_function, 
+                                 sep = " - "))
 
 ```
 
+## Load UMAP data 
+
+```{r}
+umap_data <- 
+  file_structure %>% 
+  map(function(x) x$UMAP) %>% 
+  map(function(x) {
+    file_ <- paste(x, "UMAP.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") 
+
+umap_poly_data <- 
+  file_structure %>% 
+  map(function(x) x$UMAP) %>% 
+  map(function(x) {
+    file_ <- paste(x, "UMAP_polygons.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  mutate(cluster = as.character(cluster)) 
+
+```
+
+# UMAP polygons
+
+```{r}
+umap_poly_centers <- 
+  umap_poly_data %>% 
+  filter(sub_cluster == 1) %>% 
+  left_join(cluster_annotation) %>% 
+  group_by(dataset_id, cluster, full_annotation) %>% 
+  summarise(X = mean(X),
+            Y = mean(Y)) %>% 
+  ungroup() 
+
+umap_poly_data_colored <- 
+  umap_poly_data %>%
+  left_join(umap_poly_data %>% 
+              select(dataset_id, cluster) %>% 
+              distinct() %>% 
+              group_by(dataset_id) %>% 
+              mutate(cluster_color = colorRampPalette(ggthemes::tableau_color_pal(palette = "Classic Cyclic")(13))(n_distinct(cluster))))
+
+umap_poly_data_colored %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+  geom_point(data = umap_data %>% 
+               filter(dataset_id == "tissue"),
+             aes(UMAP_1_scaled, 
+                 UMAP_2_scaled),
+             color = "black",
+             size = 0.1,
+             inherit.aes = F) +
+  geom_polygon(show.legend = F,
+               color = "black",
+               size = 0.1) +
+  geom_text(data = umap_poly_centers %>% 
+              filter(dataset_id == "tissue") ,
+            aes(X, Y, label = full_annotation),
+            size = 3,
+            inherit.aes = F) +
+  scale_fill_identity() +
+  coord_fixed() +
+  theme_void() 
+
+
+
+
+
+plots <-
+  unique(umap_poly_data_colored$dataset_id) %>% 
+  set_names(., .) %>% 
+  lapply(function(dataset_id_) {
+           
+           plot <- 
+             umap_poly_data_colored %>% 
+             filter(dataset_id == dataset_id_) %>% 
+             ggplot(aes(X, Y, fill = cluster_color, 
+                        group = paste(cluster, sub_cluster))) +
+             geom_hex(data = umap_data %>% 
+                        filter(dataset_id == dataset_id_),
+                      aes(UMAP_1_scaled, 
+                          UMAP_2_scaled,
+                          fill = "1"),
+                      fill = "darkgray",
+                      bins = 1000,
+                      inherit.aes = F) +
+             geom_polygon(show.legend = F,
+                          color = NA,
+                          size = 0.1,
+                          alpha = 0.8) +
+             geom_text(data = umap_poly_centers %>% 
+                         filter(dataset_id == dataset_id_) ,
+                       aes(X, Y, label = full_annotation),
+                       size = 3,
+                       inherit.aes = F) +
+             scale_fill_identity() +
+             coord_fixed() +
+             theme_void() +
+             ggtitle(dataset_id_)
+           
+           plot %>% 
+             ggplotly() %>% 
+             hide_legend()
+           
+         })
+
+for(dataset_id_ in names(plots)) {
+  
+  plots[[dataset_id_]] %>% 
+    as_widget() %>% 
+    htmlwidgets::saveWidget(paste0("results/interactive UMAP ",
+                                   dataset_id_,
+                                   ".html"))
+}
+
+
+```
 
