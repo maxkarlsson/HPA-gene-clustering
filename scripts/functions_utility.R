@@ -1,5 +1,19 @@
 
 
+
+savepath <- 
+  function(savename) { 
+    result_folder <- paste0("results/", Sys.Date())
+    dir.create(result_folder, showWarnings = FALSE)
+    
+    savename <-
+      paste0(result_folder, "/", savename)
+    
+    
+    return(savename)
+    
+  }
+
 mix_colors <- 
   function(color1, color2, mix = 0) {
     sapply(1:length(color1),
