@@ -18,6 +18,9 @@ editor_options:
 library(tidyverse)
 library(pbapply)
 library(plotly)
+library(readxl)
+library(tidygraph)
+library(ggraph)
 source("scripts/functions_utility.R")
 
 select <- dplyr::select
@@ -91,11 +94,15 @@ enrichment_data <-
 
 ```{r}
 
-cluster_annotation <- 
-  list(tissue = read_csv("data/annotation/Tissue 20211013.csv"),
-       blood = read_csv("data/annotation/Blood 20211013.csv"),
-       celline = read_csv("data/annotation/Celline 20211013.csv"),
-       brain = read_csv("data/annotation/Brain 20211013.csv")) %>% 
+cluster_annotation <-
+  # list(tissue = read_csv("data/annotation/Tissue 20211013.csv"),
+  #      blood = read_csv("data/annotation/Blood 20211013.csv"),
+  #      celline = read_csv("data/annotation/Celline 20211013.csv"),
+  #      brain = read_csv("data/annotation/Brain 20211013.csv")) %>% 
+  list.files("data/annotation", full.names = T) %>% 
+  {.[grepl("20211018", .)]} %>% 
+  set_names(., gsub(".*\\d |\\.xlsx$", "", .)) %>% 
+  map(. %>% read_excel()) %>% 
   bind_rows(.id = "dataset_id") %>% 
   rename(dataset_id = 1,
          cluster = 2,
@@ -232,11 +239,238 @@ for(dataset_id_ in names(plots)) {
   
   plots[[dataset_id_]] %>% 
     as_widget() %>% 
-    htmlwidgets::saveWidget(paste0("results/interactive UMAP ",
-                                   dataset_id_,
-                                   ".html"))
+    htmlwidgets::saveWidget(savepath(paste0("interactive UMAP ",
+                                            dataset_id_,
+                                            ".html")))
 }
 
 
 ```
+
+# Bubble heatmap
+
+```{r}
+
+plot_data <-
+  enrichment_data %>%
+  filter(!test_type %in% c("KEGG",
+                           "GO_BP_original",
+                           "GO_CC_original",
+                           "GO_MF_original",
+                           "GO_BP_simplified",
+                           "GO_CC_simplified",
+                           "GO_MF_simplified",
+                           "reactome")) %>% 
+  filter(grepl("specificity", test_type)) %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, cluster, full_annotation), sep = " ") %>% 
+  unite(cluster, dataset_id, cluster, full_annotation) %>% 
+  select(cluster, ID, odds_ratio) %>% 
+  group_by_all() %>% 
+  mutate(capped_odds_ratio = min(c(odds_ratio,
+                                   50))) %>% 
+  ungroup()
+
+cluster_levels <- 
+  clustering_data %>% 
+  select(dataset_id, cluster) %>% 
+  distinct() %>% 
+  arrange(dataset_id, as.numeric(cluster)) %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, cluster, full_annotation), sep = " ") %>% 
+  unite(cluster, dataset_id, cluster, full_annotation)
+
+
+
+plot_size_range <- c(1, 4)
+
+plot_legend_settings <- 
+  tibble(odds_ratio_str = c(1, 10, 20, 30, 40, ">50"),
+         y = 1:6,
+         odds_ratio = c(1, 10, 20, 30, 40, 50)) 
+
+plot_legend <-
+  plot_legend_settings %>% 
+  ggplot(aes(1, y, 
+             size = odds_ratio,
+             fill = odds_ratio,
+             label = odds_ratio_str)) +
+  geom_point(shape = 21,
+             show.legend = F) +
+  geom_text(size = 4, 
+            hjust = 0,
+            nudge_x = 0.1) +
+  annotate("text", x = 1, y = 7, label = "Odds ratio",
+           fontface = "bold", hjust = 0) +
+  scale_x_continuous(limits = c(0, 2)) +
+  scale_y_continuous(limits = c(0, 7)) +
+  scale_fill_gradient(name = "Odds ratio",
+                      low = "white", high = "orangered",
+                      breaks = plot_legend_settings$odds_ratio,
+                      limits = range(plot_legend_settings$odds_ratio)) + 
+  scale_size_continuous(name = "Odds ratio", 
+                        range = plot_size_range, 
+                        breaks = plot_legend_settings$odds_ratio,
+                        limits = range(plot_legend_settings$odds_ratio)) +
+  theme_void()
+
+plot_clustering <- 
+  plot_data %>% 
+  select(cluster, ID, odds_ratio) %>% 
+  spread(ID, odds_ratio, fill = 0) %>% 
+  column_to_rownames("cluster") %>%
+  list(tissue = t(.), 
+       cluster = .) %>%
+  map(. %>% 
+        dist(method = "binary") %>% 
+        hclust(method = "ward.D2"))
+
+plot_order <- 
+  list(cluster = unique(c(with(plot_clustering$cluster,
+                               labels[order]),
+                          cluster_levels$cluster)),
+       ID = with(plot_clustering$tissue,
+                 labels[order]))
+
+plot <-
+  plot_data %>%
+  ungroup() %>% 
+  mutate(cluster = factor(cluster,
+                          plot_order$cluster),
+         ID = factor(ID,
+                     plot_order$ID)) %>%
+  ggplot(aes(ID, cluster, 
+             size = capped_odds_ratio, 
+             fill = capped_odds_ratio)) +
+  geom_point(data = expand_grid(cluster = plot_order$cluster,
+                                ID = plot_order$ID) %>%
+               mutate(cluster = factor(cluster, unique(cluster)),
+                      ID = factor(ID, unique(ID))),
+             fill = NA,
+             size = NA) +
+  geom_point(shape = 21,
+             show.legend = F) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust = 0.5),
+        legend.position = "right") +
+  # coord_fixed() +
+  scale_fill_gradient(name = "Odds ratio",
+                      low = "white", high = "orangered",
+                      breaks = plot_legend_settings$odds_ratio,
+                      limits = range(plot_legend_settings$odds_ratio)) + 
+  scale_size_continuous(name = "Odds ratio", 
+                        range = plot_size_range, 
+                        breaks = plot_legend_settings$odds_ratio,
+                        limits = range(plot_legend_settings$odds_ratio)) +
+  theme(axis.title = element_blank()) + 
+  coord_fixed()
+
+ggsave(savepath("Total Specificity Bubble heatmap.pdf"),
+       plot = plot,
+       width = 35, height = 35)
+
+
+```
+
+
+## Bubble network
+
+```{r}
+jaccard <- function(a, b) {
+    intersection = length(intersect(a, b))
+    union = length(a) + length(b) - intersection
+    return (intersection/union)
+}
+
+
+# bubble_graph <- 
+bubble_data <- 
+  enrichment_data %>%
+  filter(dataset_id != "brain") %>% 
+  filter(test_type != "specificity_brain") %>% 
+  
+  # filter(test_type == "specificity_tissue") %>% 
+  filter(grepl("specificity", test_type)) %>%
+  filter(p.adjust < 0.01) %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, cluster, full_annotation), sep = " ") %>% 
+  unite(cluster, dataset_id, cluster, full_annotation) %>% 
+  select(cluster, ID, odds_ratio)  
+
+bubble_dist <- 
+  bubble_data %>% 
+  spread(ID, odds_ratio, fill = 0) %>% 
+  column_to_rownames("cluster") %>% 
+  dist(method = "binary") %>%
+  as.matrix() %>% 
+  as_tibble(rownames = "cluster1") %>% 
+  gather(cluster2, dist, -1) %>% 
+  filter(cluster1 != cluster2)
+
+bubble_dist %>% 
+  ggplot(aes(dist)) +
+  geom_density()
+
+bubble_nn_data <- 
+  bubble_dist %>%
+  filter(dist < 0.75) %>% 
+  group_by(cluster1) %>%
+  top_n(5, -dist) %>%
+  arrange(cluster1)
+
+
+bubble_graph <- 
+  bubble_nn_data %>% 
+  as_tbl_graph() %>% 
+  left_join(as_tibble(.) %>% 
+              separate(name, into = c("dataset_id", "cluster", "full_annotation"),
+                       sep = "_",
+                       remove = F))
+bubble_graph %>% 
+  ggraph('fabric', sort.by = node_rank_fabric()) + 
+  geom_node_range(colour = 'grey') + 
+  geom_edge_span(end_shape = 'square') + 
+  coord_fixed() +
+  theme_void()
+
+bubble_graph_layout <- 
+  bubble_graph %>% 
+  create_layout(layout = 'fr')
+
+
+bubble_graph_layout %>% 
+  ggraph() + 
+  geom_edge_link(color = "gray") +
+  geom_node_point(aes(color = dataset_id),
+                  size = 3) + 
+  # geom_node_text(aes(label = full_annotation),
+  #                size = 2) +
+  
+  theme_void()
+
+plot <-
+  bubble_graph_layout %>%
+  as_tibble() %>% 
+  ggplot(aes(x, y, label = full_annotation, color = dataset_id)) +
+  geom_segment(data = get_edges()(bubble_graph_layout) %>% 
+                 as_tibble(),
+               aes(x = x,
+                   y = y, 
+                   xend = xend, 
+                   yend = yend),
+               size = 0.2,
+               inherit.aes = F) +
+  geom_point(size = 5) +
+  geom_text(size = 3,
+            color = "black") +
+  theme_void() +
+  coord_fixed()
+
+plot %>% 
+  ggplotly() %>% 
+  as_widget() %>% 
+  htmlwidgets::saveWidget(savepath("interactive specificity net.html"))
+
+```
+
 
