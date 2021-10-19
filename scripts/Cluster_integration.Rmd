@@ -1,0 +1,378 @@
+---
+title: "Cluster_integration"
+author: "Max J Karlsson & María Bueno Álvez"
+date: "10/18/2021"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Set up
+## Load libraries
+```{r}
+library(tidyverse)
+library(magrittr)
+library(GOSemSim)
+library(readxl)
+library(pheatmap)
+library(tidygraph)
+library(ggraph)
+
+source("scripts/functions_utility.R")
+
+select <- dplyr::select
+rename <- dplyr::rename
+rename <- dplyr::rename
+```
+
+## File structure
+```{r}
+dataset_metadata <- read_csv("run_settings/20210928_settings.csv")
+
+data_paths <- read_csv("run_settings/20211012 all_datasets.csv")
+
+file_structure <-
+  create_folder_structure(dataset_id = dataset_metadata$dataset_id,
+                          dataset_run_id = dataset_metadata$version,
+                          main_folder = "results/Clustering_results",
+                          folders = c("data" = "data", 
+                                      "svg" = "svg",
+                                      "bubbleheatmap" = "svg/bubble",
+                                      "treemap" = "svg/treemap",
+                                      "heatmap" = "svg/heatmap",
+                                      "enrichment" = "enrichment",
+                                      "clustering" = "clustering"))
+```
+
+
+## Load clustering data
+
+```{r}
+
+clustering_data <- 
+  file_structure %>% 
+  map(function(x) x$clustering) %>% 
+  map(function(x) {
+    file_ <- paste(x, "final_consensus.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  mutate(cluster = as.character(cluster)) 
+
+
+```
+
+## Load clustering enrichments
+
+```{r}
+
+enrichment_data <- 
+  file_structure %>% 
+  map(function(x) x$enrichment) %>% 
+  map(function(x) {
+    file_ <- paste(x, "enrichment_results.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  mutate(cluster = as.character(cluster)) 
+
+
+```
+## Load clustering annotations
+
+```{r}
+
+annotation_data <- 
+  clustering_data %>%  
+  pull(dataset_id) %>% 
+  unique() %>% 
+  map(function(x) {
+    file_ <- paste0("results/Clustering_annotation/", x, "_annotation.xlsx", sep = "")
+    if(file.exists(file_)) {
+      file <- read_excel(file_) 
+      file %>% 
+        as_tibble() %>% 
+        mutate(dataset_id = x)
+    } else {
+      NULL
+    }
+  })  %>% 
+  bind_rows() %>% 
+  select(dataset_id, 
+         cluster = `Cluster ID`,
+         ngenes = `Num genes`,
+         reliability = Reliability,
+         Specificity,
+         Function)  %>%   
+  mutate(cluster = as.character(cluster))
+
+```
+
+## Color data 
+
+```{r}
+
+dataset_palette <- c("tissue" = "#0083C4",  "brain" = "#FFDD00", "blood" = "#CF161A", "singlecell" = "#6AA692", "celline" = "#97CF16") #"singlecell" = "#6AA692",
+reliability_palette <- c("High" = "#122740", "Medium" = "#568F8B", "Low" = "#F4F6CC") #"singlecell" = "#6AA692",
+   
+```
+
+# Semantic similarity - functional distance
+```{r}
+
+d <- godata('org.Hs.eg.db', ont="BP", computeIC=FALSE) # Get GO database(BP)
+
+go_bp <- 
+  enrichment_data %>% 
+  filter(test_description == "GO analysis Biological Process") 
+
+semsim_file <- "data/processed/semantic_similarities.tsv"
+
+if(file.exists(semsim_file)) {
+  semantic_similarities <- 
+    read_tsv(semsim_file)
+  
+} else {
+  semantic_similarities <- 
+    go_bp %>% 
+    select(dataset_id, cluster)  %>% 
+    distinct() %>% 
+    tidyr::expand(nesting(dataset_id_1 = dataset_id, cluster_1 = cluster),
+                  nesting(dataset_id_2 = dataset_id, cluster_2 = cluster)) %>% 
+    group_by_all() %>% 
+    do({
+      dat <<- .
+      value <- mgoSim(go_bp %>%  filter(dataset_id == dat$dataset_id_1, cluster == dat$cluster_1) %>%  pull(ID), 
+                      go_bp %>%  filter(dataset_id == dat$dataset_id_2, cluster == dat$cluster_2) %>%  pull(ID), 
+                      semData=d, 
+                      measure="Wang")
+      data.frame(cluster_i = dat$cluster_1, cluster_j = dat$cluster_2, value = value)
+    })
+  write_tsv(semantic_similarities, "data/processed/semantic_similarities.tsv")
+  
+}
+
+# Heatmap all clusters (with dataset label)
+clust_annotation <- 
+  annotation_data %>% 
+  select(dataset_id, cluster, Specificity, Function) %>% 
+  group_by(dataset_id, cluster) %>% 
+  summarize(annotation = paste0(cluster, "_", Specificity, " - ", Function)) %>% 
+  ungroup() %>% 
+  select(-cluster) %>% 
+  column_to_rownames("annotation")
+
+
+annotation_colors <- list(dataset_id = dataset_palette)
+
+semantic_similarities %>% 
+  mutate(cluster_1 = as.character(cluster_1),
+         cluster_2 = as.character(cluster_2)) %>% 
+  left_join(a, by = c("dataset_id_1" = "dataset_id", "cluster_1" = "cluster")) %>% 
+  left_join(a, by = c("dataset_id_2" = "dataset_id", "cluster_2" = "cluster")) %>% 
+  ungroup() %>% 
+  select(-dataset_id_1, -dataset_id_2, -cluster_i, -cluster_j, -cluster_1, -cluster_2) %>% 
+  rename(cluster_1 = annotation.x, cluster_2 = annotation.y) %>% 
+  spread(key = cluster_2, value = value) %>% 
+  column_to_rownames("cluster_1") %>% 
+  pheatmap(clustering_method = "ward.D2", 
+           fontsize = 4, 
+           annotation_row = clust_annotation,
+           annotation_col = clust_annotation, 
+           annotation_colors = annotation_colors)
+
+# Explore cluster pairs with similarity = 1
+
+int <- semantic_similarities %>% 
+  filter (value == 1) %>% 
+  filter(cluster_1 != cluster_2)
+
+
+a <- annotation_data %>% 
+  select(dataset_id, cluster, Specificity, Function) %>% 
+  group_by(dataset_id, cluster) %>% 
+  summarize(annotation = paste0(cluster, " - ", Specificity, "_", Function))
+
+int %>% 
+  mutate(cluster_1 = as.character(cluster_1),
+         cluster_2 = as.character(cluster_2)) %>% 
+  left_join(a, by = c("dataset_id_1" = "dataset_id", "cluster_1" = "cluster")) %>% 
+  left_join(a, by = c("dataset_id_2" = "dataset_id", "cluster_2" = "cluster")) 
+
+```
+
+
+# Bubble network (semantic similarity)
+```{r}
+cluster_annotation <- annotation_data %>% 
+  mutate(full_annotation = paste(Specificity, 
+                                 Function, 
+                                 sep = " - ")) 
+
+bubble_dist <- 
+  semantic_similarities %>% 
+  mutate(cluster_1 = as.character(cluster_1),
+         cluster_2 = as.character(cluster_2)) %>% 
+  left_join(cluster_annotation, by = c("dataset_id_1" = "dataset_id", "cluster_1" = "cluster")) %>% 
+  left_join(cluster_annotation, by = c("dataset_id_2" = "dataset_id", "cluster_2" = "cluster")) %>% 
+  ungroup() %>% 
+  select( -cluster_j, -cluster_i) %>% 
+  rename(dist = value,
+         full_annotation_1 = full_annotation.x,
+         full_annotation_2 = full_annotation.y) %>% 
+  unite(cluster1, dataset_id_1, cluster_1, full_annotation_1) %>% 
+  unite(cluster2, dataset_id_2, cluster_2, full_annotation_2) %>% 
+  mutate(dist = 1-dist)
+
+bubble_dist %>% 
+  ggplot(aes(dist)) +
+  geom_density()
+
+bubble_dist %>% 
+  filter(cluster1 != cluster2) %>% 
+  group_by(cluster1) %>% 
+  top_n(1, -dist) %>% 
+  arrange(-dist) %>% 
+  View
+  ggplot(aes(dist)) +
+  geom_histogram(bins = 100)
+
+bubble_nn_data <- 
+  bubble_dist %>%
+  filter(dist < 0.25) %>% 
+  group_by(cluster1) %>%
+  top_n(5, -dist) %>%
+  arrange(cluster1)
+
+
+bubble_graph <- 
+  bubble_nn_data %>% 
+  as_tbl_graph() %>% 
+  left_join(as_tibble(.) %>% 
+              separate(name, into = c("dataset_id", "cluster", "full_annotation"),
+                       sep = "_",
+                       remove = F))
+bubble_graph %>% 
+  ggraph('fabric', sort.by = node_rank_fabric()) + 
+  geom_node_range(colour = 'grey') + 
+  geom_edge_span(end_shape = 'square') + 
+  coord_fixed() +
+  theme_void()
+
+bubble_graph_layout <- 
+  bubble_graph %>% 
+  create_layout(layout = 'fr')
+
+
+bubble_graph_layout %>% 
+  ggraph() + 
+  geom_edge_link(color = "gray") +
+  geom_node_point(aes(color = dataset_id),
+                  size = 3) + 
+  # geom_node_text(aes(label = full_annotation),
+  #                size = 2) +
+  
+  theme_void()
+
+plot <-
+  bubble_graph_layout %>%
+  as_tibble() %>% 
+  ggplot(aes(x, y, label = full_annotation, color = dataset_id)) +
+  geom_segment(data = get_edges()(bubble_graph_layout) %>% 
+                 as_tibble(),
+               aes(x = x,
+                   y = y, 
+                   xend = xend, 
+                   yend = yend),
+               size = 0.2,
+               inherit.aes = F) +
+  geom_point(size = 5) +
+  geom_text(size = 3,
+            color = "black") +
+  theme_void() +
+  coord_fixed() +
+  scale_color_manual(values = dataset_palette)
+
+plot %>% 
+  ggplotly() %>% 
+  as_widget() %>% 
+  htmlwidgets::saveWidget(savepath("interactive semsim net.html"))
+
+```
+
+
+# Cluster overlap - jaccard index
+```{r}
+comb <- 
+  annotation_data %>% 
+  select(dataset_id, cluster) %>% 
+  unique()
+
+overlap_data <-
+  clustering_data %>% 
+  left_join(annotation_data) %>% 
+  mutate(annotation = paste(Specificity, Function, sep = " - ")) %>% 
+  select(-reliability , -Specificity, -Function)
+
+overlaps <- 
+  tidyr::expand(comb,
+       nesting(dataset_id, cluster),
+       nesting(dataset_id_2 = dataset_id, cluster_2 = cluster))   %>% 
+  filter(dataset_id != dataset_id_2)  %>% 
+  group_by_all() %>% 
+  do({
+   c_comb <<- . 
+   cluster_i <- 
+     overlap_data %>%  
+     filter (dataset_id == c_comb$dataset_id, 
+             cluster == c_comb$cluster)
+   cluster_j <- 
+     overlap_data %>% 
+     filter(dataset_id == c_comb$dataset_id_2, 
+            cluster ==c_comb$cluster_2)
+   
+   intersection_clusters <- length(intersect(cluster_i$gene, cluster_j$gene))
+   union_clusters <- length(union(cluster_i$gene, cluster_j$gene))
+     
+   overlap_coefficient <- 
+      intersection_clusters / min(unique(cluster_i$ngenes),unique(cluster_j$ngenes))
+   
+   jaccard_index <- 
+     intersection_clusters / union_clusters
+   
+   data.frame(dataset_i = c_comb$dataset_id, 
+              cluster_i = c_comb$cluster, 
+              annotation_i = unique(cluster_i$annotation),
+              dataset_j = c_comb$dataset_id_2, 
+              cluster_j = c_comb$cluster_2,
+              annotation_j = unique(cluster_j$annotation),
+              intersection = intersection_clusters,
+              union = union_clusters,
+              overlap_coefficient = overlap_coefficient,
+              jaccard_index = jaccard_index)
+  })
+
+
+overlap_results <- 
+  overlaps %>% 
+  ungroup %>% 
+  select(-dataset_id, -cluster, -dataset_id_2, -cluster_2) %>% 
+  arrange(-jaccard_index)
+
+writexl::write_xlsx(overlap_results, savepath("overlap_results.xlsx"))
+
+```
+
+# ORA
+```{r}
+
+```
+
