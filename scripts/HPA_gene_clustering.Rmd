@@ -113,19 +113,28 @@ run_settings <-
          list("blood" = 4.7,
               "brain" = 6.1,
               "celline" = 1.7,
-              #"singlecell" = 5.1,
+              "singlecell" = 3.1,
               "tissue" = 7.3),
        resolution_upper_limit = c("blood" = 14.5,
                             "brain" = 12.5,
                             "celline" = 15,
-                            "singlecell" = 15,
+                            "singlecell" = 20,
                             "tissue" = 11.1),
        resolution_lower_limit = c("blood" = 0.5,
                             "brain" = 0.5,
                             "celline" = 0.3,
-                            "singlecell" = 0.3,
-                            "tissue" = 0.5))
-
+                            "singlecell" = 0.5,
+                            "tissue" = 0.5),
+       n_neighbors = c("blood" = 20,
+                            "brain" = 20,
+                            "celline" = 20,
+                            "singlecell" = 20,
+                            "tissue" = 20),
+       pruning = c("blood" = 1/15,
+                            "brain" = 1/15,
+                            "celline" = 1/15,
+                            "singlecell" = 1/20,
+                            "tissue" = 1/15))
 
 #saveRDS(run_settings, ".rds")
 
@@ -136,8 +145,8 @@ run_settings <-
 
 ```{r}
 
-dataset_palette <- c("tissue" = "#0083C4",  "brain" = "#FFDD00", "blood" = "#CF161A", celline = "#97CF16") #"singlecell" = "#6AA692",
-   
+dataset_palette <- c("tissue" = "#0083C4",  "brain" = "#FFDD00", "blood" = "#CF161A","singlecell" = "#6AA692", "celline" = "#97CF16")
+reliability_palette <- c("High" = "#122740", "Medium" = "#568F8B", "Low" = "#F4F6CC") 
 ```
 
 ## File structure
@@ -250,7 +259,9 @@ all_data_cluster <-
                             resolution = seq.int(run_settings$resolution_lower_limit[[g_dataset_id]],
                                                  run_settings$resolution_upper_limit[[g_dataset_id]], by = 0.2), 
                             npcs = 100,
-                            log_transform = F) 
+                            log_transform = F,
+                            n_neighbors = run_settings$n_neighbors[[g_dataset_id]],
+                            pruning = run_settings$pruning[[g_dataset_id]])  
       
       cluster_res <- 
         cluster_res$cluster_data %>% 
@@ -275,7 +286,7 @@ all_data_cluster <-
   collect() %>% 
   ungroup()
 
-#rm(cluster)
+rm(cluster)
 Sys.time() - t
 
 all_data_cluster %>% 
@@ -365,7 +376,7 @@ all_clusters_consensus <-
           final_clustering <- find_consensus(dat, n = run_settings$num_seeds, get_membership = F, runs = 1)
           
        #   savefile_cluster_res <- paste(file_structure[[g_dataset_id]]$clustering, paste(res, "resolution_consensus.tsv", sep = "_"), sep = "/")
-          write_tsv(final_clustering, savefile_cluster_res)
+        #  write_tsv(final_clustering, savefile_cluster_res)
           
           final_clustering
         }) %>% 
@@ -545,6 +556,8 @@ graph_umaps <-
       
     } else {
       
+      set.seed(42)
+
       UMAP_res <- 
         graph_$snn %>% 
         RunUMAP(umap.method = "umap-learn") %>% 
@@ -578,7 +591,8 @@ graph_umaps <-
 
 graph_umaps %>%
   ggplot(aes(x= UMAP_1_scaled, y =UMAP_2_scaled)) +
-  geom_point() +
+  geom_point(size = 0.1) +
+  coord_fixed() +
   facet_grid(~dataset_id) +
   theme_bw()
 
@@ -946,7 +960,7 @@ intracluster_distances <-
   group_by(dataset_id) %>% 
   partition(cluster) %>% 
   do({
-    g_data <<- .
+    g_data <- .
     
     g_dataset_id <- 
       unique(g_data$dataset_id)
@@ -1229,6 +1243,10 @@ celline <- all_clusterings %>% filter(dataset_id == "celline",
 tissue <- all_clusterings %>% filter(dataset_id == "tissue",
                                           k > 70,
                                           k < 100)
+
+singlecell <- all_clusterings %>% filter(dataset_id == "singlecell",
+                                          k > 60,
+                                          k < 90)
 # %>% 
 #   filter((dataset_id == "blood" & (k > 30 | k < 60)) |
 #            (dataset_id == "brain" & (k > 40 | k < 80)) |
@@ -1240,7 +1258,8 @@ tissue <- all_clusterings %>% filter(dataset_id == "tissue",
 clusterings <- blood %>% 
   full_join(brain) %>% 
   full_join(celline) %>% 
-  full_join(tissue)
+  full_join(tissue)%>% 
+  full_join(singlecell)
 # res- k table
 res_k <- 
   clusterings %>% 
@@ -3073,7 +3092,7 @@ graph_umaps_hulls <-
   group_by(dataset_id) %>% 
   partition(cluster) %>% 
   do({
-    g_data <<- .
+    g_data <- .
     
     g_dataset_id <- 
       unique(g_data$dataset_id)
