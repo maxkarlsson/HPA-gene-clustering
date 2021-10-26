@@ -17,8 +17,16 @@ library(readxl)
 library(pheatmap)
 library(tidygraph)
 library(ggraph)
+library(ggrepel)
+library(multidplyr)
+library(clusterProfiler)
+library(ggthemes)
+library(scales)
+library(plotly)
 
 source("scripts/functions_utility.R")
+source("scripts/functions_dimensionalityreduction.R")
+source("scripts/generate_gene_clusters.R")
 
 select <- dplyr::select
 rename <- dplyr::rename
@@ -36,6 +44,7 @@ file_structure <-
                           dataset_run_id = dataset_metadata$version,
                           main_folder = "results/Clustering_results",
                           folders = c("data" = "data", 
+                                      "UMAP" = "UMAP",
                                       "svg" = "svg",
                                       "bubbleheatmap" = "svg/bubble",
                                       "treemap" = "svg/treemap",
@@ -114,15 +123,56 @@ annotation_data <-
          Function)  %>%   
   mutate(cluster = as.character(cluster))
 
+cluster_annotation <- annotation_data %>% 
+  mutate(full_annotation = paste(Specificity, 
+                                 Function, 
+                                 sep = " - ")) 
+
 ```
 
-## Color data 
+## Load UMAPs
+
+```{r}
+
+umap_data <- 
+  file_structure %>% 
+  map(function(x) x$UMAP) %>% 
+  map(function(x) {
+    file_ <- paste(x, "UMAP.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") 
+
+umap_polygons <- 
+  file_structure %>% 
+  map(function(x) x$UMAP) %>% 
+  map(function(x) {
+    file_ <- paste(x, "UMAP_polygons.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") 
+
+```
+
+## Color data & themes
 
 ```{r}
 
 dataset_palette <- c("tissue" = "#0083C4",  "brain" = "#FFDD00", "blood" = "#CF161A", "singlecell" = "#6AA692", "celline" = "#97CF16") #"singlecell" = "#6AA692",
 reliability_palette <- c("High" = "#122740", "Medium" = "#568F8B", "Low" = "#F4F6CC") #"singlecell" = "#6AA692",
-   
+
+theme_simple <- 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
 ```
 
 # Semantic similarity - functional distance
@@ -173,6 +223,13 @@ clust_annotation <-
 
 annotation_colors <- list(dataset_id = dataset_palette)
 
+
+a <- annotation_data %>% 
+  select(dataset_id, cluster, Specificity, Function) %>% 
+  group_by(dataset_id, cluster) %>% 
+  summarize(annotation = paste0(cluster, "_", Specificity, " - ", Function))
+
+pdf(savepath("semsim_allclusters.pdf"))
 semantic_similarities %>% 
   mutate(cluster_1 = as.character(cluster_1),
          cluster_2 = as.character(cluster_2)) %>% 
@@ -187,19 +244,69 @@ semantic_similarities %>%
            fontsize = 4, 
            annotation_row = clust_annotation,
            annotation_col = clust_annotation, 
-           annotation_colors = annotation_colors)
+           annotation_colors = annotation_colors,
+           fontsize_col = 1,
+           fontsize_row = 1)
+
+
+
+dev.off()
+
+pdf(savepath("semsim_allclusters_nobrain.pdf"))
+
+semantic_similarities %>% 
+  filter(dataset_id_1 != "brain",
+         dataset_id_2 != "brain") %>% 
+  mutate(cluster_1 = as.character(cluster_1),
+         cluster_2 = as.character(cluster_2)) %>% 
+  left_join(a, by = c("dataset_id_1" = "dataset_id", "cluster_1" = "cluster")) %>% 
+  left_join(a, by = c("dataset_id_2" = "dataset_id", "cluster_2" = "cluster")) %>% 
+  ungroup() %>% 
+  select(-dataset_id_1, -dataset_id_2, -cluster_i, -cluster_j, -cluster_1, -cluster_2) %>% 
+  rename(cluster_1 = annotation.x, cluster_2 = annotation.y) %>% 
+  spread(key = cluster_2, value = value) %>% 
+  column_to_rownames("cluster_1") %>% 
+  pheatmap(clustering_method = "ward.D2", 
+           fontsize = 4, 
+           annotation_row = clust_annotation,
+           annotation_col = clust_annotation, 
+           annotation_colors = annotation_colors,
+           fontsize_col = 2,
+           fontsize_row = 2)
+
+dev.off()
+
+## Per dataset
+datasets <- clustering_data %>%  pull(dataset_id) %>% unique()
+
+datasets %>% 
+  lapply(function(x) {
+    
+    pdf(savepath(paste(x, "heatmap.pdf", sep = "_")))
+    
+    semantic_similarities %>%
+      filter(dataset_id_1 == x,
+             dataset_id_2 == x) %>% 
+      mutate(cluster_1 = as.character(cluster_1),
+             cluster_2 = as.character(cluster_2)) %>% 
+      inner_join(a, by = c("dataset_id_1" = "dataset_id", "cluster_1" = "cluster")) %>% 
+      inner_join(a, by = c("dataset_id_2" = "dataset_id", "cluster_2" = "cluster")) %>% 
+      ungroup() %>% 
+      select(-dataset_id_1, -dataset_id_2, -cluster_i, -cluster_j, -cluster_1, -cluster_2) %>% 
+      rename(cluster_1 = annotation.x, cluster_2 = annotation.y) %>% 
+      spread(key = cluster_2, value = value) %>% 
+      column_to_rownames("cluster_1") %>% 
+      pheatmap(clustering_method = "ward.D2", 
+               fontsize = 6) 
+    dev.off()
+    
+  })
 
 # Explore cluster pairs with similarity = 1
 
 int <- semantic_similarities %>% 
   filter (value == 1) %>% 
   filter(cluster_1 != cluster_2)
-
-
-a <- annotation_data %>% 
-  select(dataset_id, cluster, Specificity, Function) %>% 
-  group_by(dataset_id, cluster) %>% 
-  summarize(annotation = paste0(cluster, " - ", Specificity, "_", Function))
 
 int %>% 
   mutate(cluster_1 = as.character(cluster_1),
@@ -210,12 +317,8 @@ int %>%
 ```
 
 
-# Bubble network (semantic similarity)
+## Network - SemSim  
 ```{r}
-cluster_annotation <- annotation_data %>% 
-  mutate(full_annotation = paste(Specificity, 
-                                 Function, 
-                                 sep = " - ")) 
 
 bubble_dist <- 
   semantic_similarities %>% 
@@ -247,7 +350,7 @@ bubble_dist %>%
 
 bubble_nn_data <- 
   bubble_dist %>%
-  filter(dist < 0.25) %>% 
+  filter(dist < 0.5) %>% 
   group_by(cluster1) %>%
   top_n(5, -dist) %>%
   arrange(cluster1)
@@ -322,56 +425,1151 @@ overlap_data <-
   mutate(annotation = paste(Specificity, Function, sep = " - ")) %>% 
   select(-reliability , -Specificity, -Function)
 
-overlaps <- 
-  tidyr::expand(comb,
-       nesting(dataset_id, cluster),
-       nesting(dataset_id_2 = dataset_id, cluster_2 = cluster))   %>% 
-  filter(dataset_id != dataset_id_2)  %>% 
-  group_by_all() %>% 
-  do({
-   c_comb <<- . 
-   cluster_i <- 
-     overlap_data %>%  
-     filter (dataset_id == c_comb$dataset_id, 
-             cluster == c_comb$cluster)
-   cluster_j <- 
-     overlap_data %>% 
-     filter(dataset_id == c_comb$dataset_id_2, 
-            cluster ==c_comb$cluster_2)
-   
-   intersection_clusters <- length(intersect(cluster_i$gene, cluster_j$gene))
-   union_clusters <- length(union(cluster_i$gene, cluster_j$gene))
-     
-   overlap_coefficient <- 
-      intersection_clusters / min(unique(cluster_i$ngenes),unique(cluster_j$ngenes))
-   
-   jaccard_index <- 
-     intersection_clusters / union_clusters
-   
-   data.frame(dataset_i = c_comb$dataset_id, 
-              cluster_i = c_comb$cluster, 
-              annotation_i = unique(cluster_i$annotation),
-              dataset_j = c_comb$dataset_id_2, 
-              cluster_j = c_comb$cluster_2,
-              annotation_j = unique(cluster_j$annotation),
-              intersection = intersection_clusters,
-              union = union_clusters,
-              overlap_coefficient = overlap_coefficient,
-              jaccard_index = jaccard_index)
-  })
+overlap_file <- "data/processed/overlap_results.xlsx"
+
+if(file.exists(overlap_file)) {
+  overlap_results <- 
+    read_xlsx(overlap_file)
+  
+} else {
+  overlaps <- 
+    tidyr::expand(comb,
+                  nesting(dataset_id, cluster),
+                  nesting(dataset_id_2 = dataset_id, cluster_2 = cluster))   %>% 
+    filter(dataset_id != dataset_id_2)  %>% 
+    group_by_all() %>% 
+    do({
+      c_comb <- . 
+      cluster_i <- 
+        overlap_data %>%  
+        filter (dataset_id == c_comb$dataset_id, 
+                cluster == c_comb$cluster)
+      cluster_j <- 
+        overlap_data %>% 
+        filter(dataset_id == c_comb$dataset_id_2, 
+               cluster ==c_comb$cluster_2)
+      
+      intersection_clusters <- length(intersect(cluster_i$gene, cluster_j$gene))
+      union_clusters <- length(union(cluster_i$gene, cluster_j$gene))
+      
+      overlap_coefficient <- 
+        intersection_clusters / min(unique(cluster_i$ngenes),unique(cluster_j$ngenes))
+      
+      jaccard_index <- 
+        intersection_clusters / union_clusters
+      
+      data.frame(dataset_i = c_comb$dataset_id, 
+                 cluster_i = c_comb$cluster, 
+                 annotation_i = unique(cluster_i$annotation),
+                 dataset_j = c_comb$dataset_id_2, 
+                 cluster_j = c_comb$cluster_2,
+                 annotation_j = unique(cluster_j$annotation),
+                 intersection = intersection_clusters,
+                 union = union_clusters,
+                 overlap_coefficient = overlap_coefficient,
+                 jaccard_index = jaccard_index)
+    })
+  overlap_results <- 
+    overlaps %>% 
+    ungroup %>% 
+    select(-dataset_id, -cluster, -dataset_id_2, -cluster_2) %>% 
+    arrange(-jaccard_index)
+  
+  writexl::write_xlsx(overlap_results, overlap_file)
+  
+}
 
 
-overlap_results <- 
-  overlaps %>% 
-  ungroup %>% 
-  select(-dataset_id, -cluster, -dataset_id_2, -cluster_2) %>% 
-  arrange(-jaccard_index)
 
-writexl::write_xlsx(overlap_results, savepath("overlap_results.xlsx"))
+####
+most_similar <- 
+  overlap_results %>% 
+  filter(dataset_i != "brain", 
+         dataset_j != "brain") %>% 
+  group_by(dataset_i, cluster_i) %>% 
+  top_n(1, jaccard_index) %>% 
+  arrange(dataset_i, as.numeric(cluster_i))
+
 
 ```
 
+## Network - cluster overlap
+```{r}
+jaccard_distances <- 
+  overlap_results  %>%
+  filter(dataset_i != "brain",
+         dataset_j != "brain") %>% 
+  mutate(cluster1 = paste(dataset_i, cluster_i, annotation_i, sep = "_"),
+         cluster2 = paste(dataset_j, cluster_j, annotation_j, sep = "_")) %>% 
+  select(cluster1, cluster2, jaccard_index) %>% 
+  pivot_wider(names_from = cluster2, 
+              values_from = jaccard_index, values_fill = 0) 
+
+bubble_dist <- 
+  jaccard_distances %>% 
+  gather(key = cluster2, value = dist, -cluster1)%>% 
+  mutate(dist = 1-dist) 
+
+
+bubble_dist %>% 
+  ggplot(aes(dist)) +
+  geom_density()
+
+bubble_dist %>% 
+  filter(cluster1 != cluster2) %>% 
+  group_by(cluster1) %>% 
+  top_n(1, -dist) %>% 
+  arrange(-dist) %>% 
+ # View
+  ggplot(aes(dist)) +
+  geom_histogram(bins = 100)
+
+bubble_nn_data <- 
+  bubble_dist %>%
+  filter(dist > 1) %>% 
+  group_by(cluster1) %>%
+  top_n(5, -dist) %>%
+  arrange(cluster1)
+
+
+bubble_graph <- 
+  bubble_nn_data %>% 
+  as_tbl_graph() %>% 
+  left_join(as_tibble(.) %>% 
+              separate(name, into = c("dataset_id", "cluster", "full_annotation"),
+                       sep = "_",
+                       remove = F))
+bubble_graph %>% 
+  ggraph('fabric', sort.by = node_rank_fabric()) + 
+  geom_node_range(colour = 'grey') + 
+  geom_edge_span(end_shape = 'square') + 
+  coord_fixed() +
+  theme_void()
+
+bubble_graph_layout <- 
+  bubble_graph %>% 
+  create_layout(layout = 'fr')
+
+
+bubble_graph_layout %>% 
+  ggraph() + 
+  geom_edge_link(color = "gray") +
+  geom_node_point(aes(color = dataset_id),
+                  size = 3) + 
+  # geom_node_text(aes(label = full_annotation),
+  #                size = 2) +
+  
+  theme_void()
+
+plot <-
+  bubble_graph_layout %>%
+  as_tibble() %>% 
+  ggplot(aes(x, y, label = full_annotation, color = dataset_id)) +
+  geom_segment(data = get_edges()(bubble_graph_layout) %>% 
+                 as_tibble(),
+               aes(x = x,
+                   y = y, 
+                   xend = xend, 
+                   yend = yend),
+               size = 0.2,
+               inherit.aes = F) +
+  geom_point(size = 5) +
+  geom_text(size = 3,
+            color = "black") +
+  theme_void() +
+  coord_fixed() +
+  scale_color_manual(values = dataset_palette)
+
+plot %>% 
+  ggplotly() %>% 
+  as_widget() %>% 
+  htmlwidgets::saveWidget(savepath("interactive_ jaccard_net_nobrain_no1.html"))
+```
+
+
 # ORA
+```{r}
+
+# Format clustering results as database
+database_terms <- 
+  clustering_data  %>% 
+  left_join(annotation_data %>% 
+  group_by(dataset_id, cluster) %>% 
+  summarise(annotation = paste(Specificity, Function, sep = " - "))) %>% 
+  rename(id = dataset_id, 
+         ensg_id = gene,
+         term = annotation, 
+         term_id = cluster)
+
+
+# Perform overrepresentation analysis 
+
+ora_file <- "data/processed/ora_clusters.tsv"
+
+worker_cluster <- new_cluster(n = 5)
+cluster_library(worker_cluster, c("dplyr",
+                                  "tidyverse"))
+cluster_copy(worker_cluster, c("enricher"))
+
+
+if(file.exists(ora_file)) {
+  enrichment_data <- 
+    read_tsv(ora_file)
+  
+} else {
+  database_enrichment_res <- 
+    database_terms %>% 
+    group_by(id) %>% 
+    do({
+      # For each database
+      database <- .
+      
+      term2gene <- 
+        database %>% 
+        select(term_id, ensg_id)
+      
+      cluster_copy(worker_cluster, c("term2gene"))
+      
+      # For 
+      clustering_data %>% 
+        group_by(dataset_id) %>% 
+        
+        do({
+          g_clustering_data <- .
+          
+          g_clustering_data %>% 
+            group_by(cluster) %>% 
+            partition(worker_cluster) %>%
+            do({
+              g_data <- .
+              
+              pull(g_data, gene) %>% 
+                enricher(maxGSSize = Inf, 
+                         universe = unique(g_clustering_data$gene),
+                         TERM2GENE = term2gene) %>% 
+                as_tibble()
+            }) %>% 
+            ungroup() %>% 
+            collect()
+          
+        }) %>% 
+        ungroup() 
+      
+    }) %>% 
+    ungroup()
+  
+  enrichment_data <- 
+    database_enrichment_res %>%  
+    # filter(id != dataset_id) %>% 
+    mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
+             as.numeric(gsub(".*\\/", "", GeneRatio)),
+           BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
+             as.numeric(gsub(".*\\/", "", BgRatio)),
+           odds_ratio = GeneFrac / BgFrac) 
+  
+  write_tsv(enrichment_data, ora_file)
+}
+
+rm(worker_cluster)
+
+```
+
+## Bubble plot - ORA 
+```{r}
+plot_data <-
+  enrichment_data %>%
+  filter(!(id == dataset_id)) %>% 
+  # filter(dataset_id == "tissue") %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, cluster, full_annotation), 
+            by = c("id" = "dataset_id", "ID" = "cluster")) %>%
+  select(-Description) %>% 
+  rename(Description = full_annotation) %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, cluster, full_annotation)) %>%
+  unite(cluster, dataset_id, cluster, full_annotation) %>% 
+  unite(ID, id, ID, Description) %>% 
+  select(cluster, ID, odds_ratio) %>% 
+  group_by_all() %>% 
+  mutate(capped_odds_ratio = min(c(odds_ratio,
+                                   50))) %>% 
+  ungroup() 
+
+cluster_levels <- 
+  clustering_data %>% 
+  select(dataset_id, cluster) %>% 
+  distinct() %>% 
+  arrange(dataset_id, as.numeric(cluster)) %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, cluster, full_annotation), sep = " ") %>% 
+  unite(cluster, dataset_id, cluster, full_annotation)
+
+plot_size_range <- c(1, 4)
+
+plot_legend_settings <- 
+  tibble(odds_ratio_str = c(1, 10, 20, 30, 40, ">50"),
+         y = 1:6,
+         odds_ratio = c(1, 10, 20, 30, 40, 50)) 
+
+plot_legend <-
+  plot_legend_settings %>% 
+  ggplot(aes(1, y, 
+             size = odds_ratio,
+             fill = odds_ratio,
+             label = odds_ratio_str)) +
+  geom_point(shape = 21,
+             show.legend = F) +
+  geom_text(size = 4, 
+            hjust = 0,
+            nudge_x = 0.1) +
+  annotate("text", x = 1, y = 7, label = "Odds ratio",
+           fontface = "bold", hjust = 0) +
+  scale_x_continuous(limits = c(0, 2)) +
+  scale_y_continuous(limits = c(0, 7)) +
+  scale_fill_gradient(name = "Odds ratio",
+                      low = "white", high = "orangered",
+                      breaks = plot_legend_settings$odds_ratio,
+                      limits = range(plot_legend_settings$odds_ratio)) + 
+  scale_size_continuous(name = "Odds ratio", 
+                        range = plot_size_range, 
+                        breaks = plot_legend_settings$odds_ratio,
+                        limits = range(plot_legend_settings$odds_ratio)) +
+  theme_void()
+
+plot_clustering <- 
+  plot_data %>% 
+  select(cluster, ID, odds_ratio) %>% 
+  spread(ID, odds_ratio, fill = 0) %>% 
+  column_to_rownames("cluster") %>%
+  list(tissue = t(.), 
+       cluster = .) %>%
+  map(. %>% 
+        dist(method = "binary") %>% 
+        hclust(method = "ward.D2"))
+
+plot_order <- 
+  list(cluster = unique(c(with(plot_clustering$cluster,
+                               labels[order]),
+                          cluster_levels$cluster)),
+       ID = with(plot_clustering$tissue,
+                 labels[order]))
+
+plot <-
+  plot_data %>%
+  ungroup() %>% 
+  mutate(cluster = factor(cluster,
+                          plot_order$cluster),
+         ID = factor(ID,
+                     plot_order$ID)) %>%
+  ggplot(aes(ID, cluster, 
+             size = capped_odds_ratio, 
+             fill = capped_odds_ratio)) +
+  geom_point(data = expand_grid(cluster = plot_order$cluster,
+                                ID = plot_order$ID) %>%
+               mutate(cluster = factor(cluster, unique(cluster)),
+                      ID = factor(ID, unique(ID))),
+             fill = NA,
+             size = NA) +
+  geom_point(shape = 21,
+             show.legend = F) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust = 0.5, size = 6),
+        legend.position = "right",
+        axis.text.y = element_text(size = 6)) +
+  # coord_fixed() +
+  scale_fill_gradient(name = "Odds ratio",
+                      low = "white", high = "orangered",
+                      breaks = plot_legend_settings$odds_ratio,
+                      limits = range(plot_legend_settings$odds_ratio)) + 
+  scale_size_continuous(name = "Odds ratio", 
+                        range = plot_size_range, 
+                        breaks = plot_legend_settings$odds_ratio,
+                        limits = range(plot_legend_settings$odds_ratio)) +
+  theme(axis.title = element_blank()) + 
+  coord_fixed()
+
+ggsave(savepath("Buble_heatmap_all_overlap.pdf"),
+       plot = plot,
+       width = 35, height = 35)
+
+```
+
+## Network - ORA 
+```{r}
+
+enrichment_data %>% 
+  filter(!(id == dataset_id)) %>% 
+  filter(dataset_id %in% c("brain", "blood")) %>% 
+  filter(id %in% c("brain", "blood")) %>% 
+  filter(cluster %in% c(1, 35))
+
+enrichment_data %>% 
+  filter(!(id == dataset_id)) %>% 
+  filter(cluster < ID) %>% 
+  arrange(-odds_ratio) %>% 
+  mutate(n = row_number()) %>% 
+  ggplot(aes(odds_ratio, n)) +
+  geom_line()
+
+enrichment_data %>% 
+  filter(!(id == dataset_id)) %>% 
+  ggplot(aes(odds_ratio)) +
+  geom_density()
+
+enrichment_data %>% 
+  filter(!(id == dataset_id)) %>% 
+  ggplot(aes(-log10(p.adjust))) +
+  geom_density()
+
+graph_component_count()
+
+```
+
+# Term UMAP
+
+## GO UMAP
+## Biological processes (BP)
+```{r}
+#Read data
+GO <- 
+  enrichment_data %>%
+  filter(test_type == "GO_BP_original") %>% 
+  select(dataset_id,
+         cluster,
+         GOID = ID) %>% 
+  filter(dataset_id != "brain") %>% 
+  unite(cluster, dataset_id, cluster, sep = "_")
+
+GO_sparse <-
+  GO %>%
+  mutate(value = 1) %>% 
+  pivot_wider(names_from = GOID, 
+              values_from = value, values_fill = 0)
+GO_pca <- 
+  GO_sparse %>% 
+  column_to_rownames("cluster") %>% 
+  pca_calc(npcs = 50)
+
+set.seed(42)
+GO_umap <- 
+  GO_pca$scores %>%
+  as_tibble() %>%
+  mutate(cluster = GO_sparse$cluster) %>% 
+  select(c(1:50,"cluster")) %>% 
+  umap_calc(n_neigh = 5, row_names = "cluster")
+
+features_annotation <- 
+  annotation_data %>% 
+  mutate(features = paste(dataset_id, cluster, sep = "_"),
+         annotation = paste(cluster, Specificity, Function, sep = "_")) %>% 
+  select(dataset_id, features, annotation)
+
+lab_data <- 
+  GO_umap %>%
+  left_join(features_annotation) %>% 
+    group_by(dataset_id,annotation) %>% 
+    summarise(V1 = mean(V1),
+              V2 = mean(V2))
+  
+plot <- 
+  GO_umap %>%
+  left_join(features_annotation) %>% 
+  rename(cluster = features) %>% 
+  ggplot(aes(V1,V2, group = cluster, color = dataset_id)) +
+  geom_point(size = 2) + 
+  theme_simple +
+  geom_text_repel(inherit.aes = F, data = lab_data, aes(V1, V2, label = annotation),
+                  size = 0.8,
+                  max.overlaps = 40) +
+  scale_color_manual(values = dataset_palette)
+
+plot <- 
+  GO_umap %>%
+  left_join(features_annotation) %>% 
+  rename(cluster = features) %>% 
+  ggplot(aes(V1,V2, group = cluster, color = dataset_id)) +
+  geom_point(size = 2) + 
+  theme_simple +
+  geom_text(inherit.aes = F, data = lab_data, aes(V1, V2, label = annotation),
+                  size = 2) +
+  coord_fixed() +
+  scale_color_manual(values = dataset_palette)
+
+plot %>% 
+  ggplotly() %>% 
+  as_widget() %>% 
+  htmlwidgets::saveWidget(savepath("interactive_semsim_UMAP.html"))
+
+ggsave(savepath("semsim_UMAP_nobrain.pdf"))
+```
+## All (BP, MF, CC)
+```{r}
+#Read data
+
+assays <- c("GO_BP_original", "GO_MF_original", "GO_CC_original")
+GO <- 
+  enrichment_data %>%
+  filter(test_type %in% assays) %>% 
+  select(dataset_id,
+         cluster,
+         GOID = ID) %>% 
+  filter(dataset_id != "brain") %>% 
+  unite(cluster, dataset_id, cluster, sep = "_")
+
+GO_sparse <-
+  GO %>%
+  mutate(value = 1) %>% 
+  pivot_wider(names_from = GOID, 
+              values_from = value, values_fill = 0)
+GO_pca <- 
+  GO_sparse %>% 
+  column_to_rownames("cluster") %>% 
+  pca_calc(npcs = 50)
+
+set.seed(42)
+GO_umap <- 
+  GO_pca$scores %>%
+  as_tibble() %>%
+  mutate(cluster = GO_sparse$cluster) %>% 
+  select(c(1:50,"cluster")) %>% 
+  umap_calc(n_neigh = 5, row_names = "cluster")
+
+features_annotation <- 
+  annotation_data %>% 
+  mutate(features = paste(dataset_id, cluster, sep = "_"),
+         annotation = paste(cluster, Specificity, Function, sep = "_")) %>% 
+  select(dataset_id, features, annotation)
+
+lab_data <- 
+  GO_umap %>%
+  left_join(features_annotation) %>% 
+    group_by(dataset_id,annotation) %>% 
+    summarise(V1 = mean(V1),
+              V2 = mean(V2))
+  
+plot <- 
+  GO_umap %>%
+  left_join(features_annotation) %>% 
+  rename(cluster = features) %>% 
+  ggplot(aes(V1,V2, group = cluster, color = dataset_id)) +
+  geom_point(size = 2) + 
+  theme_simple +
+  geom_text_repel(inherit.aes = F, data = lab_data, aes(V1, V2, label = annotation),
+                  size = 0.8,
+                  max.overlaps = 40) +
+  scale_color_manual(values = dataset_palette)
+
+plot <- 
+  GO_umap %>%
+  left_join(features_annotation) %>% 
+  rename(cluster = features) %>% 
+  ggplot(aes(V1,V2, group = cluster, color = dataset_id)) +
+  geom_point(size = 2) + 
+  theme_simple +
+  geom_text(inherit.aes = F, data = lab_data, aes(V1, V2, label = annotation),
+                  size = 3) +
+  coord_fixed() +
+  scale_color_manual(values = dataset_palette)
+
+plot %>% 
+  ggplotly() %>% 
+  as_widget() %>% 
+  htmlwidgets::saveWidget(savepath("interactive_semsim_UMAP_allGO.html"))
+
+ggsave(savepath("semsim_UMAP_nobrain_allGO.pdf"))
+```
+
+## All terms
+```{r}
+#Read data
+
+GO <- 
+  enrichment_data %>%
+#  filter(test_type %in% assays) %>% 
+  select(dataset_id,
+         cluster,
+         GOID = ID) %>% 
+  filter(dataset_id != "brain") %>% 
+  unite(cluster, dataset_id, cluster, sep = "_")
+
+GO_sparse <-
+  GO %>%
+  unique() %>% 
+  mutate(value = 1) %>% 
+  pivot_wider(names_from = GOID, 
+              values_from = value, values_fill = 0)
+GO_pca <- 
+  GO_sparse %>% 
+  column_to_rownames("cluster") %>% 
+  pca_calc(npcs = 50)
+
+set.seed(42)
+GO_umap <- 
+  GO_pca$scores %>%
+  as_tibble() %>%
+  mutate(cluster = GO_sparse$cluster) %>% 
+  select(c(1:50,"cluster")) %>% 
+  umap_calc(n_neigh = 5, row_names = "cluster")
+
+features_annotation <- 
+  annotation_data %>% 
+  mutate(features = paste(dataset_id, cluster, sep = "_"),
+         annotation = paste(cluster, Specificity, Function, sep = "_")) %>% 
+  select(dataset_id, features, annotation)
+
+lab_data <- 
+  GO_umap %>%
+  left_join(features_annotation) %>% 
+    group_by(dataset_id,annotation) %>% 
+    summarise(V1 = mean(V1),
+              V2 = mean(V2))
+  
+plot <- 
+  GO_umap %>%
+  left_join(features_annotation) %>% 
+  rename(cluster = features) %>% 
+  ggplot(aes(V1,V2, group = cluster, color = dataset_id)) +
+  geom_point(size = 2) + 
+  theme_simple +
+  geom_text_repel(inherit.aes = F, data = lab_data, aes(V1, V2, label = annotation),
+                  size = 0.8,
+                  max.overlaps = 40) +
+  scale_color_manual(values = dataset_palette)
+
+plot <- 
+  GO_umap %>%
+  left_join(features_annotation) %>% 
+  rename(cluster = features) %>% 
+  ggplot(aes(V1,V2, group = cluster, color = dataset_id)) +
+  geom_point(size = 2) + 
+  theme_simple +
+  geom_text(inherit.aes = F, data = lab_data, aes(V1, V2, label = annotation),
+                  size = 3) +
+  coord_fixed() +
+  scale_color_manual(values = dataset_palette)
+
+plot %>% 
+  ggplotly() %>% 
+  as_widget() %>% 
+  htmlwidgets::saveWidget(savepath("interactive_semsim_UMAP_all_terms.html"))
+
+ggsave(savepath("semsim_UMAP_nobrain_all_terms.pdf"))
+```
+
+
+
+
+# Protein classes
+```{r}
+protein_class <- 
+  read_tsv("proteinclass_103.tsv")
+
+protein_class %>% pull(class) %>% unique()
+
+#"Mitochondrial proteins
+# Transcription factors
+# Ribosomal proteins
+# "Mitochondrial proteins,Transcription factors
+# Mitochondrial proteins,Ribosomal proteins
+
+ribosomal_proteins <- 
+  protein_class %>% 
+  filter(class == "Ribosomal proteins") %>% 
+  pull(ensg_id)
+
+classes <- c("Ribosomal proteins", "Transcription factors", "Mitochondrial proteins")
+umap_data %>%
+  left_join(protein_class, by = c("gene" = "ensg_id")) %>% 
+  mutate(gene_color = case_when(#class == "Ribosomal proteins" ~ "blue",
+                              #  class == "Transcription factors" ~ "red",
+                                class == "Mitochondrial proteins" ~ "#CD6839",
+                                TRUE ~ "grey"))%>% 
+  #mutate(class = case_when(class %in% classes ~ class,
+   #                        TRUE ~ "others")) %>% 
+  ggplot(aes(UMAP_1_scaled, UMAP_2_scaled, color = gene_color, group = gene_color)) +
+  geom_point(size = 0.1) +
+  scale_color_identity() +
+  coord_fixed() +
+  theme_void() +
+  facet_wrap(~dataset_id, ncol = 5)
+
+ggsave(savepath("umap_protein_classes_mitochondrialproteins.pdf"))
+
+umap_polygons
+
+```
+
+
+## Genes classified in same cluster???????
+```{r}
+
+```
+
+
+# Low specificity clusters
+```{r}
+# 15 clusters in tissue with low tissue specificity
+# clustering_data %>% 
+#   left_join(annotation_data) %>% 
+#   filter(dataset_id == "tissue",
+#          Specificity == "Low tissue specificity") %>% 
+#   group_by(dataset_id) %>% 
+#   mutate(cluster_color = tableau_seq_gradient_pal("Blue")(seq(0, 1, length = 15)))
+  #pull(cluster) %>% unique() %>% length() # # 15 clusters in tissue with low tissue specificity
+
+cluster_colors <- data.frame(cluster = clustering_data %>% 
+                               left_join(annotation_data) %>% 
+                               filter(dataset_id == "blood",
+                                      Specificity == "Low tissue specificity") %>% 
+                               pull(cluster) %>% unique(),
+                             color =  tableau_seq_gradient_pal("Blue")(seq(0, 1, length = 15)))
+
+t <- clustering_data %>% 
+  left_join(annotation_data) %>% 
+  filter(dataset_id == "blood") %>% 
+  left_join(cluster_colors) %>% 
+  mutate(cluster_color = case_when(is.na(color) ~ "#C8C8C8",
+                           TRUE ~ color))  
+  
+
+umap_data %>% 
+  inner_join(t) %>% 
+  ggplot(aes(UMAP_1_scaled, UMAP_2_scaled, color = cluster_color, group = cluster_color)) +
+  geom_point() +
+  scale_color_identity() +
+  coord_fixed() +
+  theme_void() 
+
+gene_dict <- 
+  t %>%
+  select(gene, cluster_color)
+  
+umap_data %>% 
+  inner_join(gene_dict) %>% 
+  ggplot(aes(UMAP_1_scaled, UMAP_2_scaled, color = cluster_color, group = cluster_color)) +
+  geom_point(size = 0.01) +
+  scale_color_identity() +
+  coord_fixed() +
+  theme_void() +
+  facet_wrap(~dataset_id, ncol = 5)
+
+ggsave(savepath("umap_lowspecificity_blood.pdf"))
+
+
+# Find out genes that are together in all
+
+
+### compare if low specificity genes o
+
+low_specificity_genes <-
+  clustering_data %>%
+  left_join(annotation_data) %>%
+   filter(grepl("Low", Specificity)) %>%
+  select(dataset_id, gene)
+
+
+to_venn <- low_specificity_genes %>%
+  group_by(dataset_id) %>%
+  group_split(.keep = F) %>%
+  set_names(unique(low_specificity_genes$dataset_id))
+
+
+low_specificity_genes %>%
+  group_by(dataset_id) %>%
+  summarise(n = n_distinct(gene))
+# 
+# Venn diagram?
+library(ggvenn)
+
+x <- list(blood = to_venn$blood$gene,
+   brain = to_venn$brain$gene,
+  celline = to_venn$celline$gene,
+  tissue = to_venn$tissue$gene,
+  singlecell = to_venn$singlecell$gene)
+
+ggvenn(x) #,
+     # fill_color = dataset_palette[-2])
+```
+
+
+
+## Low specificity annotations
+```{r}
+
+to_plot <- 
+  annotation_data %>%  
+  left_join(clustering_data) %>%
+  filter(gene %in% common_genes$gene,
+         dataset_id != "brain") %>% 
+  select(dataset_id, gene, Specificity) %>% 
+  spread(dataset_id, Specificity) %>% 
+  filter(grepl("Low", tissue)) %>% 
+  na.omit()
+
+library(ggalluvial)
+
+to_plot %>% 
+  group_by(blood, celline, singlecell, tissue) %>% 
+  summarise(Freq =n_distinct(gene)) %>% 
+  ggplot( aes(y = Freq, axis1 = blood, axis2 = celline, axis3 = singlecell, axis4 = tissue)) +
+  geom_alluvium(aes(fill = tissue), width = 1/12) +
+  geom_stratum(width = 1/12, fill = "black", color = "grey") +
+  geom_label(stat = "stratum", aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("Gender", "Dept"), expand = c(.05, .05)) +
+  scale_fill_brewer(type = "qual", palette = "Set1")
+
+
+annotation_data %>%  
+  left_join(clustering_data) %>% 
+  filter(dataset_id != "brain") %>% 
+  select(dataset_id, gene, Specificity) %>% 
+  group_by(dataset_id) %>% 
+  mutate(total_genes = n_distinct(gene)) %>% 
+  filter(grepl("Low", Specificity)) %>% 
+  group_by(dataset_id) %>% 
+  mutate(low_specificity_genes = n_distinct(gene), total_genes)%>%
+  ungroup() %>% 
+  group_by(gene) %>% 
+  summarise(n = n_distinct(dataset_id), total_genes, low_specificity_genes, dataset_id) %>% 
+  ungroup() %>%
+  filter(n == 4) %>% 
+  group_by(dataset_id) %>% 
+  summarise(common = n_distinct(gene), total_genes, low_specificity_genes) %>% 
+  distinct() %>%
+  mutate(genes = total_genes - low_specificity_genes - common,
+         low_specificity_genes = low_specificity_genes - common) %>% 
+    select(-total_genes) %>% 
+  gather(condition, value, common:genes) %>% 
+  mutate(condition = factor(condition, levels = (c("genes", "low_specificity_genes", "common")))) %>% 
+  # mutate(condition = factor(condition, rev(condition))) %>% 
+   ggplot(aes(fill = condition, y = value, x = dataset_id)) +
+  geom_bar(poistion = "stack", stat = "identity") +
+  theme_simple +
+  scale_fill_manual(values = c("genes" = "grey", "low_specificity_genes" = "#45A4A7", "common" = "#692140"))
+
+ggsave(savepath("low_specificity_genes.pdf"))
+
+
+common_genes <- 
+  clustering_data %>% 
+  filter(dataset_id != "brain") %>% 
+  group_by(gene) %>% 
+  mutate(n = n_distinct(dataset_id)) %>% 
+  ungroup() %>% 
+  filter(n == 4) %>% 
+  select(gene) %>% 
+  distinct()
+
+common_genes_low <- 
+  annotation_data %>%  
+  left_join(clustering_data) %>% 
+  select(dataset_id, gene, Specificity) %>% 
+  group_by(dataset_id) %>% 
+  mutate(total_genes = n_distinct(gene)) %>% 
+  filter(grepl("Low", Specificity)) %>% 
+  group_by(dataset_id) %>% 
+  mutate(low_specificity_genes = n_distinct(gene), total_genes)%>%
+  ungroup() %>% 
+  group_by(gene) %>% 
+  summarise(n = n_distinct(dataset_id), total_genes, low_specificity_genes, dataset_id) %>% 
+  ungroup() %>%
+  select(gene, n) %>% 
+  unique() %>% 
+  filter(n== 5) %>% 
+  select(-n)
+
+write_tsv(common_genes_low, savepath("common_genes_low.tsv"))
+
+library(vroom)
+GOterms <- 
+  vroom("data/meta/Ensembl103 GO terms.txt") %>% 
+  select(ensg_id = 1, 
+         gene_name = 2, 
+         GO_accession = 3, 
+         GO_domain = 4, 
+         GO_term_name = 5, 
+         GO_term_evidence = 6) %>% 
+  filter(ensg_id %in% all_genes_in_data)
+
+term2gene <- 
+  GOterms %>% 
+  rename(term_id = GO_accession) %>%
+  filter(GO_domain == "biological_process") %>% 
+  select(term_id, ensg_id)
+
+res <- enricher(common_genes_low$gene, universe = common_genes$gene, TERM2GENE =term2gene )
+
+dict <- GOterms %>% 
+  select(term_id = GO_accession, GO_term_name)
+
+res  %>% 
+  as_tibble() %>% 
+  left_join(dict, by = c("ID" = "term_id")) %>% 
+  arrange(-p.adjust) %>%
+  distinct() %>% 
+  mutate(GO_term_name = factor(GO_term_name, levels = GO_term_name)) %>% 
+  ggplot(aes(x = GO_term_name, y = -log10(p.adjust))) +
+  coord_flip()+ 
+  geom_bar(stat="identity") +
+  theme_simple
+  
+
+ggsave(savepath("common_genes_GO.pdf"))
+
+
+###
+annotation_data %>% 
+  group_by(dataset_id) %>% 
+  summarise(n = sum(ngenes))
+
+
+# VEnn diagram low specificity genes
+library(ggvenn)
+
+low_specificity_genes <-
+  clustering_data %>%
+  left_join(annotation_data) %>%
+  filter(grepl("Low", Specificity)) %>%
+  select(dataset_id, gene)
+
+to_venn <- low_specificity_genes %>%
+  group_by(dataset_id) %>%
+  group_split(.keep = F) %>%
+  set_names(unique(low_specificity_genes$dataset_id))
+
+x <- list(blood = to_venn$blood$gene,
+   brain = to_venn$brain$gene,
+  celline = to_venn$celline$gene,
+  tissue = to_venn$tissue$gene,
+  singlecell = to_venn$singlecell$gene)
+
+ggvenn(x)
+
+to_venn <- list(blood = to_venn$blood$gene,
+ #  brain = to_venn$brain$gene,
+  celline = to_venn$celline$gene,
+  tissue = to_venn$tissue$gene,
+  singlecell = to_venn$singlecell$gene)
+
+ggvenn(to_venn)
+
+library(UpSetR)
+upset(fromList(x), order.by = "freq", nintersects = 100)
+
+ggsave(savepath("upset_lowspecificity.pdf"))
+
+## Upset plot all genes
+y <- list(blood = clustering_data %>% filter(dataset_id == "blood") %>%  pull(gene),
+   brain = clustering_data %>% filter(dataset_id == "brain") %>%  pull(gene),
+  celline = clustering_data %>% filter(dataset_id == "celline") %>%  pull(gene),
+  tissue = clustering_data %>% filter(dataset_id == "tissue") %>%  pull(gene),
+  singlecell = clustering_data %>% filter(dataset_id == "singlecell") %>%  pull(gene))
+
+ggvenn(y)
+
+upset(fromList(y), order.by = "freq", nintersects = 100)
+
+ggsave(savepath("upset_all.pdf"))
+
+
+z <- list(blood = clustering_data %>% filter(dataset_id == "blood") %>%  pull(gene),
+ #  brain = clustering_data %>% filter(dataset_id == "brain") %>%  pull(gene),
+  celline = clustering_data %>% filter(dataset_id == "celline") %>%  pull(gene),
+  tissue = clustering_data %>% filter(dataset_id == "tissue") %>%  pull(gene),
+  singlecell = clustering_data %>% filter(dataset_id == "singlecell") %>%  pull(gene))
+
+ggvenn(z)
+ggsave(savepath("venn_diagram.pdf"))
+
+# blood: 3,109
+# brain: 11,265
+# celline: 2,170
+# singlecell: 2,916
+# tissue: 4,425
+
+# annotation_data %>%  
+#   left_join(clustering_data) %>% 
+#   select(dataset_id, gene, Specificity) %>% 
+#   spread(dataset_id, Specificity) %>% 
+#  # column_to_rownames("gene") %>% 
+#   umap_calc(row_names = "gene", n_neigh = 15, n_comp = 5)
+
+# plot_data <- clustering_data %>% 
+#   filter(dataset_id == "tissue")
+# 
+# umap_data %>% 
+#   filter(dataset_id == "singlecell") %>% 
+#   left_join(plot_data %>% 
+#               select(-dataset_id)) %>% 
+#   ggplot(aes(UMAP_1_scaled, UMAP_2_scaled, color = cluster)) +
+#   geom_point(show.legend = F, size = 0.05) +
+#   coord_fixed() +
+#   theme_simple +
+#   scale_color_manual(values =  colorRampPalette(ggthemes::tableau_color_pal(
+#     palette = "Classic Cyclic")(13))(max(as.numeric(plot_data$cluster))))
+```
+
+
+# UMAP from combined dataset expression
+```{r}
+all_data <-
+  readRDS("data/processed/combined_HPA_expression_data.RDS")
+
+all_data <-
+  lapply(1:nrow(dataset_metadata),
+         function(i) {
+           id_ <- paste(dataset_metadata$dataset_id[i],
+                        dataset_metadata$type[i],
+                        sep = "_")
+           all_data[[id_]]
+         }) %>%
+  set_names(dataset_metadata$dataset_id)
+
+all_data <- all_data[!sapply(all_data,is.null)] 
+  
+all_genes_in_data <-
+  all_data %>% 
+  map(. %>% 
+        select(1)) %>% 
+  bind_rows() %>% 
+  distinct() %>% 
+  pull(ensg_id)
+
+gene_max_exp <- 
+  all_data %>% 
+  map(. %>%
+        column_to_rownames("ensg_id") %>% 
+        apply(MARGIN = 1,
+              max) %>% 
+        enframe("ensg_id", "max_exp")) %>% 
+  bind_rows(.id = "dataset_id")
+
+expressed_genes <- 
+  gene_max_exp %>% 
+  filter(max_exp >= 1) %>% 
+  select(1, 2)
+
+common_genes <- 
+  expressed_genes %>% 
+  group_by(ensg_id) %>% 
+  summarise(n = n_distinct(dataset_id)) %>% 
+  filter(n == 5) %>% 
+  pull(ensg_id)
+
+
+# all_data_umap <- 
+#   all_data %>% 
+#   map(. %>% 
+#         gather(sample_id, tmm, -1)) %>% 
+#   bind_rows(.id = "dataset_id") %>% 
+#   inner_join(expressed_genes) %>% 
+#   filter(ensg_id %in% common_genes) %>% 
+#   ungroup() %>% 
+#   select(-dataset_id) %>% 
+#   unique() %>% 
+#   spread(sample_id, tmm, -ensg_id)
+
+
+all_data_umap <- 
+  all_data$blood %>% 
+  inner_join(all_data$celline) %>% 
+  inner_join(all_data$tissue) %>% 
+  inner_join(all_data$singlecell) %>% 
+  filter(ensg_id %in% common_genes) 
+
+# dat <-
+#    all_data %>% 
+#   map(. %>% 
+#         gather(sample_id, tmm, -1)) %>% 
+#   bind_rows(.id = "dataset_id") %>% 
+#    filter(ensg_id %in% common_genes) %>% 
+#    select(-dataset_id)
+
+scaled_data <- 
+      scale_data(df = all_data_umap %>%
+                   gather(sample_id, tmm, -1),
+                 col_value = "tmm",
+                   col_gene = "ensg_id", 
+                   col_sample = "sample_id",
+                   log_transform = F, 
+                   scaling = "zscore")
+
+pca_data <- 
+  scaled_data %>%
+  spread(sample_id, exp) %>% 
+  column_to_rownames("ensg_id") %>%
+  calculate_pca(npcs = 100)
+
+ncomp <- 
+  pca_data$sdev[(pca_data$sdev)^2 >= 1] %>% 
+  tail(1) %>%  
+  enframe () %$% 
+  name
+
+ncomp <- as.numeric(gsub("PC", "", ncomp))
+
+if (pca_data$stats[ncomp, ]$R2cum < 0.8) {
+  ncomp <- pca_data$stats %>% 
+    filter(R2cum > 0.8) %>% 
+    pull(PC) %>% 
+    head(1)
+}
+
+plot <- 
+  pca_data$stats %>%
+  ggplot(aes(PC,R2cum)) +
+  geom_point() +
+  geom_line() +
+  theme_bw() +
+  theme_bw() +
+  geom_vline(xintercept = ncomp, linetype = "dashed") +
+  annotate("text",
+           x = ncomp,
+           y = 0.55,
+           label = paste0("PC ", ncomp,
+                          "\nR2 = ", round(pca_data$stats[ncomp, ]$R2cum, 3)),
+           hjust = 1,
+           vjust = 0)
+
+umap_data_all <- 
+  pca_data$scores %>% 
+  as.data.frame() %>% 
+  select(1:ncomp) %>% # Select the number of components determined with the Kaiser rule
+ # mutate(ensg_id = all_data_umap$ensg_id) %>% 
+  rownames_to_column("ensg_id") %>% 
+  umap_calc(row_names = "ensg_id", n_neigh = 15, n_comp = 2)
+
+
+plot_data <- 
+  clustering_data %>% 
+              filter(dataset_id == "singlecell")
+umap_data_all %>% 
+  left_join(plot_data, by = c("features" = "gene")) %>% 
+  ggplot(aes(V1, V2, color = cluster)) +
+  geom_point(show.legend = F, size = 0.5) +
+  coord_fixed() +
+  theme_simple +
+scale_color_manual(values =  colorRampPalette(ggthemes::tableau_color_pal(
+  palette = "Classic Cyclic")(13))(max(as.numeric(plot_data$cluster))))
+
+umap_data_all %>% 
+  left_join(clustering_data %>% 
+              filter(dataset_id != "brain"),
+            by = c("features" = "gene")) %>% 
+  ggplot(aes(V1, V2, color = cluster)) +
+  geom_point(show.legend = F, size = 0.05) +
+  coord_fixed() +
+  theme_simple +
+  facet_grid(~dataset_id) +
+scale_color_manual(values =  colorRampPalette(ggthemes::tableau_color_pal(
+  palette = "Classic Cyclic")(13))(87))
+
+
+ggsave(savepath("umap_all.pdf"))
+
+```
+
+## MOFA?
 ```{r}
 
 ```
