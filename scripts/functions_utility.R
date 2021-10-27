@@ -425,3 +425,46 @@ spread_colors <-
     }
     
   }
+
+
+complete_palette <- 
+  function(pal_terms, pal, default_pal) {
+    pal_terms %>% 
+      enframe("i", "name") %>% 
+      left_join(pal %>% 
+                  enframe("name", "color"),
+                by = c("name")) %>% 
+      group_by(group = is.na(color)) %>% 
+      mutate(color2 = default_pal(n_distinct(name))[row_number()]) %>% 
+      ungroup() %>% 
+      mutate(color = ifelse(is.na(color),
+                            color2, 
+                            color)) %>% 
+      select(name, color) %>% 
+      deframe()
+    
+  }
+
+
+complete_palette_neighbor <- 
+  function(pal_terms, pal) {
+    
+    pal_terms %>% 
+      enframe("i", "name") %>% 
+      select(-i) %>% 
+      expand_grid(term = names(pal)) %>% 
+      distinct() %>% 
+      left_join(pal %>% 
+                  enframe("term", "color"),
+                by = c("term")) %>% 
+      distinct() %>% 
+      mutate(strsim = stringdist::stringsim(name, term)) %>% 
+      arrange(-strsim) %>% 
+      group_by(name) %>% 
+      slice(1) %>% 
+      ungroup() %>% 
+      select(name, color) %>% 
+      deframe()
+    
+  }
+
