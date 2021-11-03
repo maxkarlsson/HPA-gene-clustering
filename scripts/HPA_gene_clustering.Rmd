@@ -522,6 +522,53 @@ p2 <- data_long %>%
   
 ```
 
+# Nearest neighbors
+
+```{r}
+neighbor_data <-
+  file_structure %>%
+  map(function(x) x$distance) %>%
+  map(function(x) {
+    
+    nn_file <- paste(x, "nearest_neighbors.tsv", sep = "/")
+    
+    if(file.exists(nn_file)) {
+      nn_data <- read_tsv(nn_file)
+    } else {
+      file_ <- paste(x, "distances.rds", sep = "/")
+      if(file.exists(file_)) {
+        distances <-
+          readRDS(file_) %>%
+          as.matrix()
+        nn_data <-
+          colnames(distances) %>%
+          enframe("i", "gene") %>%
+          select(gene) %>%
+          group_by(gene) %>%
+          do({
+            g_gene <- .$gene
+            distances[g_gene, ] %>%
+              enframe("neighbor_gene", "cor_distance") %>%
+              arrange(cor_distance) %>%
+              head(20) %>% 
+              mutate(cor = 1-cor_distance)
+          }) %>%
+          ungroup()
+        rm(distances)
+        write_tsv(nn_data, nn_file)
+        nn_data
+      } else {
+        NULL
+      }
+    }
+  }) %>%
+  bind_rows(.id = "dataset_id")
+
+
+```
+
+
+
 # UMAP
 ## Read graphs
 ```{r}
