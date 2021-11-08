@@ -468,3 +468,31 @@ complete_palette_neighbor <-
     
   }
 
+calculate_tau_score <- 
+  function(wide_data) {
+    max_exp <- 
+      apply(wide_data,
+            MARGIN = 1,
+            max)
+    
+    N <- 
+      apply(wide_data,
+            MARGIN = 1,
+            function(x) length(which(!is.na(x))))
+    
+    expression_sum <- 
+      wide_data %>% 
+      sweep(MARGIN = 1, 
+            STATS = max_exp, 
+            FUN = `/`) %>% 
+      {1 - .} %>% 
+      apply(MARGIN = 1,
+            sum)
+    
+    
+    tau_score <- 
+      (expression_sum / (N - 1)) %>% 
+      enframe("gene", "tau_score")
+    
+    tau_score
+  }
