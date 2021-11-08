@@ -300,6 +300,7 @@ HPAspecificity_formatting_function <-
   mutate(term = trimws(term), 
          term_id = term)
 
+
 database_formatting_functions <- 
   list(secretome_location = . %>% 
          select(ensg_id = Ensembl,
@@ -384,7 +385,30 @@ get_db <-
     db_format_function <- 
       database_formatting_functions[[db_id]]
     
+    raw_db %>% 
+      db_format_function()
+  }
+
+get_specificity_db <- 
+  function(enrichment_settings, db_id) {
+    
+    db_file <- 
+      enrichment_settings %>% 
+      filter(id == db_id) %>% 
+      pull(file)
+    
+    raw_db <- 
+      read_tsv(paste0("annotation_databases/", db_file))
+    
+    
     out_db <- 
       raw_db %>% 
-      db_format_function()
+      set_colnames(c("ensg_id",
+                     "specificity_category",
+                     "distribution_category",
+                     "ts_score",
+                     "enhanced_score",
+                     "enhanced_tissues"))
+    
+    out_db
   }
