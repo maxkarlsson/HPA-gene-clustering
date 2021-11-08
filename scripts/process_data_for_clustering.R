@@ -8,7 +8,7 @@ data_path <-
   "data/expression_data/HPA21_E103/"
 
 dataset_path_file <- 
-  "run_settings/20211012 all_datasets.csv"
+  "run_settings/20211108 all_datasets.csv"
 
 
 dataset_paths <- 
@@ -35,6 +35,9 @@ processing_functions <-
          select(ensg_id, sample = tissue, ntpm) %>%
          spread(sample, ntpm),
        tissue_region = . %>% 
+         select(ensg_id, sample = tissue, ntpm) %>%
+         spread(sample, ntpm),
+       tissue_consensus = . %>% 
          select(ensg_id, sample = tissue, ntpm) %>%
          spread(sample, ntpm),
        celline_consensus = . %>% 
