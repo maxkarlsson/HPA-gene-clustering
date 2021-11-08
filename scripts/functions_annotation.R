@@ -272,3 +272,119 @@ annotation_report <- function(i) {
     plot_layout(widths = c(3, 2,2), heights = c(2,4))
 }
 
+
+
+# Formatting functions:
+
+
+GO_formatting_function <- 
+  . %>% 
+  select(ensg_id = `Gene stable ID`,
+         term = `GO term name`,
+         term_id = `GO term accession`) %>% 
+  filter(!is.na(term)) %>% 
+  distinct() %>% 
+  filter(ensg_id %in% clustering_data$gene) %>% 
+  group_by(term_id, term) %>% 
+  filter(n_distinct(ensg_id) >= 8) %>% 
+  ungroup()
+
+HPAspecificity_formatting_function <- 
+  . %>% 
+  select(ensg_id,
+         term = enhanced_tissues) %>% 
+  mutate(term = gsub(", ", ";", term)) %>% 
+  separate_rows(term, sep = ",") %>% 
+  mutate(term = gsub(";", ", ", term)) %>% 
+  filter(!is.na(term)) %>% 
+  mutate(term = trimws(term), 
+         term_id = term)
+
+database_formatting_functions <- 
+  list(secretome_location = . %>% 
+         select(ensg_id = Ensembl,
+                term = `Secretome location`) %>% 
+         filter(!is.na(term)) %>% 
+         mutate(term_id = term),
+       
+       specificity_blood = HPAspecificity_formatting_function,
+       specificity_brain = HPAspecificity_formatting_function,
+       specificity_tissue = HPAspecificity_formatting_function,
+       specificity_celline = HPAspecificity_formatting_function,
+       specificity_singlecell = HPAspecificity_formatting_function,
+       
+       subcellular_location = . %>% 
+         filter(Gene %in% clustering_data$gene) %>% 
+         select(ensg_id = Gene, 
+                Enhanced, 
+                Supported, 
+                Approved) %>% 
+         gather(reliability, location, -1) %>% 
+         filter(!is.na(location)) %>% 
+         separate_rows(location, sep = ";") %>% 
+         select(ensg_id, term = location) %>% 
+         mutate(term_id = term),
+       
+       panglao_cellmarkers = . %>% 
+         filter(grepl("Hs", species), 
+                `gene type` %in% c("protein-coding gene",
+                                   "protein coding gene")) %>% 
+         select(gene_name = 2, 
+                term = 3) %>% 
+         distinct() %>% 
+         mutate(term_id = term),
+       
+       protein_class = . %>% select(ensg_id = Ensembl,
+                                    protein_class = `Protein class`) %>% 
+         separate_rows(protein_class, sep = ", ") %>% 
+         rename(term = protein_class) %>% 
+         mutate(term_id = term),
+       
+       reactome = . %>% 
+         filter(species == "Homo sapiens") %>% 
+         select(ensg_id, term = description, term_id = id) %>% 
+         distinct() %>% 
+         filter(ensg_id %in% clustering_data$gene), 
+       
+       trrust = . %>% 
+         select(gene_name, term) %>% 
+         mutate(term_id = term),
+       
+       GO_BP_original = . %>% 
+         filter(`GO domain` == "biological_process") %>% 
+         GO_formatting_function,
+       GO_MF_original = . %>% 
+         filter(`GO domain` == "molecular_function") %>% 
+         GO_formatting_function,
+       GO_CC_original = . %>% 
+         filter(`GO domain` == "cellular_component") %>% 
+         GO_formatting_function)
+
+
+
+gene_formatting_functions <- 
+  list(`gene names` = . %>% 
+         left_join(gene_info %>% 
+                     select(ensg_id, gene_name),
+                   by = c("gene_name")) %>% 
+         select(ensg_id, term, term_id))
+
+
+get_db <- 
+  function(enrichment_settings, db_id) {
+    
+    db_file <- 
+      enrichment_settings %>% 
+      filter(id == db_id) %>% 
+      pull(file)
+    
+    raw_db <- 
+      read_tsv(paste0("annotation_databases/", db_file))
+    
+    db_format_function <- 
+      database_formatting_functions[[db_id]]
+    
+    out_db <- 
+      raw_db %>% 
+      db_format_function()
+  }
