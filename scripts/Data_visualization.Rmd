@@ -304,7 +304,7 @@ cluster_annotation %>%
   filter(ann_function1 < ann_function2) %>% 
   filter(sim < 0.3) %>% 
   arrange(sim)
-  
+
 cluster_annotation %>% 
   filter(grepl("&", full_annotation)) 
 
@@ -484,11 +484,7 @@ plot_data %>%
 
 
 #########################
-tidy_movies %>%
-  distinct(title, year, length, .keep_all=TRUE) %>%
-  ggplot(aes(x=Genres)) +
-    geom_bar() +
-    scale_x_upset(n_intersections = 20)
+
 
 clustering_data %>% 
   left_join(annotation_status) %>% 
@@ -507,9 +503,8 @@ clustering_data %>%
   mutate(n_dat = length(datasets[[1]])) %>% 
   ungroup() %>% 
   ggplot(aes(datasets, n, fill = specificity_status)) +
-    geom_col() +
-    scale_x_upset(n_intersections = 30) +
-  facet_wrap(~ n_dat, nrow = 1, scales = "free_x")
+  geom_col() +
+  scale_x_upset(n_intersections = 30) 
 
 clustering_data %>% 
   left_join(annotation_status) %>% 
@@ -627,18 +622,18 @@ graph_data <-
   left_join(node_type_coords) %>% 
   activate(edges) %>% 
   mutate(edge_type = case_when(node_type_coords$type[from] == "Section" &
-                            node_type_coords$type[to] == "Section" ~
-                            "Specificity",
-                          node_type_coords$type[from] == "External" |
-                            node_type_coords$type[to] == "External" ~
-                            "External",
-                          node_type_coords$type[from] == "HPA" |
-                            node_type_coords$type[to] == "HPA" ~
-                            "HPA")) %>% 
+                                 node_type_coords$type[to] == "Section" ~
+                                 "Specificity",
+                               node_type_coords$type[from] == "External" |
+                                 node_type_coords$type[to] == "External" ~
+                                 "External",
+                               node_type_coords$type[from] == "HPA" |
+                                 node_type_coords$type[to] == "HPA" ~
+                                 "HPA")) %>% 
   create_layout(layout = 'manual',
                 x = node_type_coords$x,
                 y = node_type_coords$y) 
-  
+
 edge_data <- get_edges()(graph_data)
 
 plots <- 
@@ -702,435 +697,153 @@ plots <-
 
 
 
-  
-  
+
+
 ```
 
 
 
 # UMAP
 
-## UMAP example
-
-### Tissue Cluster 22
-```{r}
-
-example_cluster <- 
-  cluster_annotation %>% 
-  filter(dataset_id == "tissue") %>% 
-  filter(reliability == "High") %>% 
-  filter(cluster == 22)
-
-example_cluster_genes <- 
-  clustering_data %>% 
-  filter(dataset_id == "tissue",
-         cluster == example_cluster$cluster)
-
-example_gene <- 
-  "ENSG00000111834"
-################
-
-p1 <- 
-  umap_data %>% 
-  filter(dataset_id == "tissue") %>% 
-  ggplot(aes(X, Y)) +
-  geom_point_rast(aes(UMAP_1_scaled, 
-                      UMAP_2_scaled),
-                  color = "darkgray",
-                  size = 0.1,
-                  inherit.aes = F) +
-  coord_fixed() +
-  theme_void() 
-
-p2 <-
-  umap_poly_data_colored %>% 
-  filter(dataset_id == "tissue") %>% 
-  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
-  geom_point_rast(data = umap_data %>% 
-                    filter(dataset_id == "tissue"),
-                  aes(UMAP_1_scaled, 
-                      UMAP_2_scaled),
-                  color = "darkgray",
-                  size = 0.1,
-                  inherit.aes = F) +
-  
-  geom_polygon(show.legend = F,
-               color = NA,
-               size = 0.1,
-               alpha = 0.8) +
-  scale_fill_identity() +
-  coord_fixed() +
-  theme_void() 
-
-p3 <- 
-  umap_poly_data_colored %>% 
-  filter(cluster == example_cluster$cluster) %>% 
-  filter(dataset_id == "tissue") %>% 
-  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
-  geom_point_rast(data = umap_data %>% 
-                    filter(dataset_id == "tissue"),
-                  aes(UMAP_1_scaled, 
-                      UMAP_2_scaled),
-                  color = "darkgray",
-                  size = 0.1,
-                  inherit.aes = F) +
-  
-  geom_polygon(show.legend = F,
-               color = NA,
-               size = 0.1,
-               alpha = 0.8) +
-  scale_fill_identity() +
-  coord_fixed() +
-  theme_void() 
-
-p4 <-
-  umap_poly_data_colored %>% 
-  # filter(cluster == example_cluster$cluster) %>% 
-  filter(dataset_id == "tissue") %>% 
-  {ggplot(., aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
-      geom_point_rast(data = umap_data %>%
-                        filter(dataset_id == "tissue"),
-                      aes(UMAP_1_scaled,
-                          UMAP_2_scaled),
-                      color = "darkgray",
-                      size = 0.1,
-                      inherit.aes = F) +
-      
-      geom_polygon(show.legend = F,
-                   color = NA,
-                   size = 0.1,
-                   alpha = 0.8) +
-      scale_fill_identity() +
-      scale_x_continuous(limits = scales::expand_range(range(.$X[.$cluster == example_cluster$cluster]),
-                                                       2)) +
-      scale_y_continuous(limits = scales::expand_range(range(.$Y[.$cluster == example_cluster$cluster]),
-                                                       2)) +
-      coord_fixed() +
-      theme_void() }
-
-
-ggsave(savepath("UMAP example plot p1.pdf"),
-       width = 8, height = 8,
-       plot = p1)
-ggsave(savepath("UMAP example plot p2.pdf"),
-       width = 8, height = 8,
-       plot = p2)
-ggsave(savepath("UMAP example plot p3.pdf"),
-       width = 8, height = 8,
-       plot = p3)
-ggsave(savepath("UMAP example plot p4.pdf"),
-       width = 8, height = 8,
-       plot = p4)
-
-ggsave(savepath("UMAP example plot p1.png"),
-       width = 8, height = 8,
-       plot = p1)
-ggsave(savepath("UMAP example plot p2.png"),
-       width = 8, height = 8,
-       plot = p2)
-ggsave(savepath("UMAP example plot p3.png"),
-       width = 8, height = 8,
-       plot = p3)
-ggsave(savepath("UMAP example plot p4.png"),
-       width = 8, height = 8,
-       plot = p4)
-
-
-###############################################################
-
-p5 <-
-  umap_poly_data_colored %>% 
-  filter(dataset_id == "tissue") %>% 
-  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
-  geom_point_rast(data = umap_data %>%
-                    filter(dataset_id == "tissue"),
-                  aes(UMAP_1_scaled,
-                      UMAP_2_scaled),
-                  color = "darkgray",
-                  size = 0.1,
-                  inherit.aes = F) +
-
-  
-  geom_polygon(data = . %>% 
-                 filter(cluster != example_cluster$cluster),
-               show.legend = F,
-               fill = "gray",
-               color = "black",
-               size = 0.1,
-               alpha = 0.8) +
-  geom_polygon(data = . %>% 
-                 filter(cluster == example_cluster$cluster),
-               show.legend = F,
-               color = "black",
-               size = 0.1,
-               alpha = 0.8) +
-   geom_point(data = umap_data %>% 
-               filter(dataset_id == "tissue") %>% 
-               filter(gene == example_gene),
-             aes(UMAP_1_scaled, 
-                 UMAP_2_scaled),
-             color = "red",
-             size = 3,
-             inherit.aes = F) +
-  scale_fill_identity() +
-  coord_fixed() +
-  theme_void() 
-
-ggsave(savepath("UMAP example plot p5.pdf"),
-       width = 8, height = 8,
-       plot = p5)
-
-ggsave(savepath("UMAP example plot p5.png"),
-       width = 8, height = 8,
-       plot = p5)
-
-p6 <-
-  umap_poly_data_colored %>% 
-  filter(cluster == example_cluster$cluster) %>%
-  filter(dataset_id == "tissue") %>% 
-  {ggplot(., aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
-      geom_point_rast(data = umap_data %>%
-                        filter(gene %in% example_cluster_genes$gene) %>% 
-                        filter(dataset_id == "tissue"),
-                      aes(UMAP_1_scaled,
-                          UMAP_2_scaled),
-                      color = "darkgray",
-                      size = 0.1,
-                      inherit.aes = F) +
-      
-      geom_polygon(show.legend = F,
-                   color = NA,
-                   size = 0.1,
-                   alpha = 0.8) +
-      scale_fill_identity() +
-      scale_x_continuous(limits = scales::expand_range(range(.$X[.$cluster == example_cluster$cluster]),
-                                                       1)) +
-      scale_y_continuous(limits = scales::expand_range(range(.$Y[.$cluster == example_cluster$cluster]),
-                                                       1)) +
-      coord_fixed() +
-      theme_void() }
-
-ggsave(savepath("UMAP example plot p6.pdf"),
-       width = 8, height = 8,
-       plot = p6)
-
-ggsave(savepath("UMAP example plot p6.png"),
-       width = 8, height = 8,
-       plot = p6)
-
-```
-
-### Tissue cluster 54
-
-```{r}
-
-example_cluster <- 
-  cluster_annotation %>% 
-  filter(dataset_id == "tissue") %>% 
-  # filter(reliability == "High") %>% 
-  filter(cluster == 54)
-
-example_cluster_genes <- 
-  clustering_data %>% 
-  filter(dataset_id == "tissue",
-         cluster == example_cluster$cluster)
-
-example_gene <- 
-  "ENSG00000004864"
-################
-
-p1 <- 
-  umap_data %>% 
-  filter(dataset_id == "tissue") %>% 
-  ggplot(aes(X, Y)) +
-  geom_point_rast(aes(UMAP_1_scaled, 
-                      UMAP_2_scaled),
-                  color = "darkgray",
-                  size = 0.1,
-                  inherit.aes = F) +
-  coord_fixed() +
-  theme_void() 
-
-p2 <-
-  umap_poly_data_colored %>% 
-  filter(dataset_id == "tissue") %>% 
-  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
-  geom_point_rast(data = umap_data %>% 
-                    filter(dataset_id == "tissue"),
-                  aes(UMAP_1_scaled, 
-                      UMAP_2_scaled),
-                  color = "darkgray",
-                  size = 0.1,
-                  inherit.aes = F) +
-  
-  geom_polygon(show.legend = F,
-               color = NA,
-               size = 0.1,
-               alpha = 0.8) +
-  scale_fill_identity() +
-  coord_fixed() +
-  theme_void() 
-
-p3 <- 
-  umap_poly_data_colored %>% 
-  filter(cluster == example_cluster$cluster) %>% 
-  filter(dataset_id == "tissue") %>% 
-  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
-  geom_point_rast(data = umap_data %>% 
-                    filter(dataset_id == "tissue"),
-                  aes(UMAP_1_scaled, 
-                      UMAP_2_scaled),
-                  color = "darkgray",
-                  size = 0.1,
-                  inherit.aes = F) +
-  
-  geom_polygon(show.legend = F,
-               color = NA,
-               size = 0.1,
-               alpha = 0.8) +
-  scale_fill_identity() +
-  coord_fixed() +
-  theme_void() 
-
-p4 <-
-  umap_poly_data_colored %>% 
-  # filter(cluster == example_cluster$cluster) %>% 
-  filter(dataset_id == "tissue") %>% 
-  {ggplot(., aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
-      geom_point_rast(data = umap_data %>%
-                        filter(dataset_id == "tissue"),
-                      aes(UMAP_1_scaled,
-                          UMAP_2_scaled),
-                      color = "darkgray",
-                      size = 0.1,
-                      inherit.aes = F) +
-      
-      geom_polygon(show.legend = F,
-                   color = NA,
-                   size = 0.1,
-                   alpha = 0.8) +
-      scale_fill_identity() +
-      scale_x_continuous(limits = scales::expand_range(range(.$X[.$cluster == example_cluster$cluster]),
-                                                       2)) +
-      scale_y_continuous(limits = scales::expand_range(range(.$Y[.$cluster == example_cluster$cluster]),
-                                                       2)) +
-      coord_fixed() +
-      theme_void() }
-
-
-ggsave(savepath("UMAP example plot p1.pdf"),
-       width = 8, height = 8,
-       plot = p1)
-ggsave(savepath("UMAP example plot p2.pdf"),
-       width = 8, height = 8,
-       plot = p2)
-ggsave(savepath("UMAP example plot p3.pdf"),
-       width = 8, height = 8,
-       plot = p3)
-ggsave(savepath("UMAP example plot p4.pdf"),
-       width = 8, height = 8,
-       plot = p4)
-
-ggsave(savepath("UMAP example plot p1.png"),
-       width = 8, height = 8,
-       plot = p1)
-ggsave(savepath("UMAP example plot p2.png"),
-       width = 8, height = 8,
-       plot = p2)
-ggsave(savepath("UMAP example plot p3.png"),
-       width = 8, height = 8,
-       plot = p3)
-ggsave(savepath("UMAP example plot p4.png"),
-       width = 8, height = 8,
-       plot = p4)
-
-
-###############################################################
-
-p5 <-
-  umap_poly_data_colored %>% 
-  filter(dataset_id == "tissue") %>% 
-  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
-  geom_point_rast(data = umap_data %>%
-                    filter(dataset_id == "tissue"),
-                  aes(UMAP_1_scaled,
-                      UMAP_2_scaled),
-                  color = "darkgray",
-                  size = 0.1,
-                  inherit.aes = F) +
-
-  
-  geom_polygon(data = . %>% 
-                 filter(cluster != example_cluster$cluster),
-               show.legend = F,
-               fill = "gray",
-               color = "black",
-               size = 0.1,
-               alpha = 0.8) +
-  geom_polygon(data = . %>% 
-                 filter(cluster == example_cluster$cluster),
-               show.legend = F,
-               color = "black",
-               size = 0.1,
-               alpha = 0.8) +
-   geom_point(data = umap_data %>% 
-               filter(dataset_id == "tissue") %>% 
-               filter(gene == example_gene),
-             aes(UMAP_1_scaled, 
-                 UMAP_2_scaled),
-             color = "red",
-             size = 3,
-             inherit.aes = F) +
-  scale_fill_identity() +
-  coord_fixed() +
-  theme_void() 
-
-ggsave(savepath("UMAP example plot p5.pdf"),
-       width = 8, height = 8,
-       plot = p5)
-
-ggsave(savepath("UMAP example plot p5.png"),
-       width = 8, height = 8,
-       plot = p5)
-
-p6 <-
-  umap_poly_data_colored %>% 
-  filter(cluster == example_cluster$cluster) %>%
-  filter(dataset_id == "tissue") %>% 
-  {ggplot(., aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
-      geom_point_rast(data = umap_data %>%
-                        filter(gene %in% example_cluster_genes$gene) %>% 
-                        filter(dataset_id == "tissue"),
-                      aes(UMAP_1_scaled,
-                          UMAP_2_scaled),
-                      color = "darkgray",
-                      size = 0.1,
-                      inherit.aes = F) +
-      
-      geom_polygon(show.legend = F,
-                   color = NA,
-                   size = 0.1,
-                   alpha = 0.8) +
-      scale_fill_identity() +
-      scale_x_continuous(limits = scales::expand_range(range(.$X[.$cluster == example_cluster$cluster]),
-                                                       1)) +
-      scale_y_continuous(limits = scales::expand_range(range(.$Y[.$cluster == example_cluster$cluster]),
-                                                       1)) +
-      coord_fixed() +
-      theme_void() }
-
-ggsave(savepath("UMAP example plot p6.pdf"),
-       width = 8, height = 8,
-       plot = p6)
-
-ggsave(savepath("UMAP example plot p6.png"),
-       width = 8, height = 8,
-       plot = p6)
-
-```
-
 
 ## UMAP polygons
+
+
+### Create polygons
+
+```{r}
+
+umap_plot_data <- 
+  umap_data %>%  
+  left_join(clustering_data)
+
+generate_cluster_hulls
+
+
+hull_settings <- 
+  expand_grid(dataset_id = unique(umap_plot_data$dataset_id),
+              relative_bandwidth_i = c(150),
+              poly_concavity = c(2),
+              poly_smoothing = c(1.25),
+              n = 1000) %>% 
+  mutate(relative_bandwidth = 1 / relative_bandwidth_i,
+         i = row_number())
+
+
+hull_data <- 
+  pblapply(hull_settings$i,
+         function(i) {
+           
+           plot_data <- 
+             umap_plot_data %>% 
+             filter(dataset_id == hull_settings$dataset_id[i])
+           
+           generate_cluster_hulls(V1 = plot_data$UMAP_1_scaled,
+                                  V2 = plot_data$UMAP_2_scaled, 
+                                  element_id = plot_data$gene,
+                                  cluster_membership = plot_data$cluster, 
+                                  n = hull_settings$n[i],
+                                  poly_concavity = hull_settings$poly_concavity[i],
+                                  poly_smoothing = hull_settings$poly_smoothing[i],
+                                  relative_bandwidth = hull_settings$relative_bandwidth[i]) 
+           
+         })
+
+hull_data %>% 
+  map(. %>% {.$hulls}) %>% 
+  bind_rows(.id = "i") %>% 
+  left_join(hull_settings %>% 
+              mutate(i = as.character(i))) %>% 
+  # filter(relative_bandwidth_i == 150,
+  #        dataset_id == "tissue") %>% 
+  # filter(X > 0, Y > 0) %>% 
+  ggplot(aes(X, Y, group = polygon_id, fill = cluster)) +
+  geom_hex(data = umap_data %>%
+             filter(dataset_id %in% hull_settings$dataset_id),
+           aes(UMAP_1_scaled, UMAP_2_scaled, fill = 1),
+           fill = "gray70",
+           bins = 200,
+           inherit.aes = F) +
+  geom_polygon(show.legend = F,
+               color = "black") +
+  facet_wrap( ~ dataset_id + 
+                relative_bandwidth_i + 
+                poly_concavity + 
+                poly_smoothing, nrow = 2) +
+  coord_fixed() +
+  theme_bw() +
+  
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid = element_blank())
+
+
+
+############
+############
+
+all_graph_umap_hulls <- 
+  all_graph_umap_data_scaled %>% 
+  select(dataset_id) %>% 
+  distinct() %>% 
+  # slice(6) %>% 
+  # slice(1, 4, 6) %>% 
+  pull(dataset_id) %>%
+  set_names(., .) %>% 
+  pblapply(function(dataset_id_) {
+    all_graph_umap_data_scaled %>% 
+      filter(dataset_id == dataset_id_) %$%
+      generate_cluster_hulls(UMAP_1,
+                             UMAP_2, 
+                             element_id = gene,
+                             cluster_membership = factor(cluster), 
+                             bandwidth_fct = 5,
+                             n = 1000)
+  })
+
+all_graph_umap_hull_data <- 
+  all_graph_umap_hulls %>% 
+  map(. %$% 
+        hulls) %>% 
+  bind_rows(.id = "dataset_id")
+
+
+rm(all_graph_umap_hulls)
+gc()
+# all_graph_umap_hull_data %>% 
+#   filter(density_type == "primary secondary") %>% 
+#   select(1, 2, 3, 4, 5) %>% 
+#   distinct()
+
+all_graph_umap_hull_data %>% 
+  filter(density_type == "primary secondary") %>%
+  ggplot(aes(X,Y, group = paste(cluster, sub_cluster, landmass), fill = cluster)) +
+  geom_polygon(show.legend = F,
+               color = "black") +
+  theme_bw() +
+  facet_grid(~dataset_id) +
+  coord_fixed()
+ggsave(run_id_savename("UMAP scaled hulls.pdf"),
+       width = 8, height = 5)
+
+
+# Save
+# all_graph_umap_hull_data %>% 
+#   filter(density_type == "primary secondary") %>% 
+#   unite(polygon_id, cluster, sub_cluster, landmass, remove = F) %>% 
+#   select(polygon_id, cluster, UMAP1 = X, UMAP2 = Y) %>% 
+#   write_csv(run_id_savename("UMAP draft polygon coordinates.csv"))
+#   
+# 
+# cluster_hulls$data %>% 
+#   select(ensg_id = element_id, 
+#          UMAP1 = V1, 
+#          UMAP2 = V2,
+#          cluster) %>% 
+#   write_csv(run_id_savename("UMAP draft gene coordinates.csv"))
+
+```
+
+
 
 ### plotly
 
@@ -1424,6 +1137,426 @@ ggsave(savepath("Specificity grouped ann UMAP combined.pdf"),
 
 
 ```
+
+## UMAP example
+
+### Tissue Cluster 22
+```{r}
+
+example_cluster <- 
+  cluster_annotation %>% 
+  filter(dataset_id == "tissue") %>% 
+  filter(reliability == "High") %>% 
+  filter(cluster == 22)
+
+example_cluster_genes <- 
+  clustering_data %>% 
+  filter(dataset_id == "tissue",
+         cluster == example_cluster$cluster)
+
+example_gene <- 
+  "ENSG00000111834"
+################
+
+p1 <- 
+  umap_data %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X, Y)) +
+  geom_point_rast(aes(UMAP_1_scaled, 
+                      UMAP_2_scaled),
+                  color = "darkgray",
+                  size = 0.1,
+                  inherit.aes = F) +
+  coord_fixed() +
+  theme_void() 
+
+p2 <-
+  umap_poly_data_colored %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+  geom_point_rast(data = umap_data %>% 
+                    filter(dataset_id == "tissue"),
+                  aes(UMAP_1_scaled, 
+                      UMAP_2_scaled),
+                  color = "darkgray",
+                  size = 0.1,
+                  inherit.aes = F) +
+  
+  geom_polygon(show.legend = F,
+               color = NA,
+               size = 0.1,
+               alpha = 0.8) +
+  scale_fill_identity() +
+  coord_fixed() +
+  theme_void() 
+
+p3 <- 
+  umap_poly_data_colored %>% 
+  filter(cluster == example_cluster$cluster) %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+  geom_point_rast(data = umap_data %>% 
+                    filter(dataset_id == "tissue"),
+                  aes(UMAP_1_scaled, 
+                      UMAP_2_scaled),
+                  color = "darkgray",
+                  size = 0.1,
+                  inherit.aes = F) +
+  
+  geom_polygon(show.legend = F,
+               color = NA,
+               size = 0.1,
+               alpha = 0.8) +
+  scale_fill_identity() +
+  coord_fixed() +
+  theme_void() 
+
+p4 <-
+  umap_poly_data_colored %>% 
+  # filter(cluster == example_cluster$cluster) %>% 
+  filter(dataset_id == "tissue") %>% 
+  {ggplot(., aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+      geom_point_rast(data = umap_data %>%
+                        filter(dataset_id == "tissue"),
+                      aes(UMAP_1_scaled,
+                          UMAP_2_scaled),
+                      color = "darkgray",
+                      size = 0.1,
+                      inherit.aes = F) +
+      
+      geom_polygon(show.legend = F,
+                   color = NA,
+                   size = 0.1,
+                   alpha = 0.8) +
+      scale_fill_identity() +
+      scale_x_continuous(limits = scales::expand_range(range(.$X[.$cluster == example_cluster$cluster]),
+                                                       2)) +
+      scale_y_continuous(limits = scales::expand_range(range(.$Y[.$cluster == example_cluster$cluster]),
+                                                       2)) +
+      coord_fixed() +
+      theme_void() }
+
+
+ggsave(savepath("UMAP example plot p1.pdf"),
+       width = 8, height = 8,
+       plot = p1)
+ggsave(savepath("UMAP example plot p2.pdf"),
+       width = 8, height = 8,
+       plot = p2)
+ggsave(savepath("UMAP example plot p3.pdf"),
+       width = 8, height = 8,
+       plot = p3)
+ggsave(savepath("UMAP example plot p4.pdf"),
+       width = 8, height = 8,
+       plot = p4)
+
+ggsave(savepath("UMAP example plot p1.png"),
+       width = 8, height = 8,
+       plot = p1)
+ggsave(savepath("UMAP example plot p2.png"),
+       width = 8, height = 8,
+       plot = p2)
+ggsave(savepath("UMAP example plot p3.png"),
+       width = 8, height = 8,
+       plot = p3)
+ggsave(savepath("UMAP example plot p4.png"),
+       width = 8, height = 8,
+       plot = p4)
+
+
+###############################################################
+
+p5 <-
+  umap_poly_data_colored %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+  geom_point_rast(data = umap_data %>%
+                    filter(dataset_id == "tissue"),
+                  aes(UMAP_1_scaled,
+                      UMAP_2_scaled),
+                  color = "darkgray",
+                  size = 0.1,
+                  inherit.aes = F) +
+  
+  
+  geom_polygon(data = . %>% 
+                 filter(cluster != example_cluster$cluster),
+               show.legend = F,
+               fill = "gray",
+               color = "black",
+               size = 0.1,
+               alpha = 0.8) +
+  geom_polygon(data = . %>% 
+                 filter(cluster == example_cluster$cluster),
+               show.legend = F,
+               color = "black",
+               size = 0.1,
+               alpha = 0.8) +
+  geom_point(data = umap_data %>% 
+               filter(dataset_id == "tissue") %>% 
+               filter(gene == example_gene),
+             aes(UMAP_1_scaled, 
+                 UMAP_2_scaled),
+             color = "red",
+             size = 3,
+             inherit.aes = F) +
+  scale_fill_identity() +
+  coord_fixed() +
+  theme_void() 
+
+ggsave(savepath("UMAP example plot p5.pdf"),
+       width = 8, height = 8,
+       plot = p5)
+
+ggsave(savepath("UMAP example plot p5.png"),
+       width = 8, height = 8,
+       plot = p5)
+
+p6 <-
+  umap_poly_data_colored %>% 
+  filter(cluster == example_cluster$cluster) %>%
+  filter(dataset_id == "tissue") %>% 
+  {ggplot(., aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+      geom_point_rast(data = umap_data %>%
+                        filter(gene %in% example_cluster_genes$gene) %>% 
+                        filter(dataset_id == "tissue"),
+                      aes(UMAP_1_scaled,
+                          UMAP_2_scaled),
+                      color = "darkgray",
+                      size = 0.1,
+                      inherit.aes = F) +
+      
+      geom_polygon(show.legend = F,
+                   color = NA,
+                   size = 0.1,
+                   alpha = 0.8) +
+      scale_fill_identity() +
+      scale_x_continuous(limits = scales::expand_range(range(.$X[.$cluster == example_cluster$cluster]),
+                                                       1)) +
+      scale_y_continuous(limits = scales::expand_range(range(.$Y[.$cluster == example_cluster$cluster]),
+                                                       1)) +
+      coord_fixed() +
+      theme_void() }
+
+ggsave(savepath("UMAP example plot p6.pdf"),
+       width = 8, height = 8,
+       plot = p6)
+
+ggsave(savepath("UMAP example plot p6.png"),
+       width = 8, height = 8,
+       plot = p6)
+
+```
+
+### Tissue cluster 54
+
+```{r}
+
+example_cluster <- 
+  cluster_annotation %>% 
+  filter(dataset_id == "tissue") %>% 
+  # filter(reliability == "High") %>% 
+  filter(cluster == 54)
+
+example_cluster_genes <- 
+  clustering_data %>% 
+  filter(dataset_id == "tissue",
+         cluster == example_cluster$cluster)
+
+example_gene <- 
+  "ENSG00000004864"
+################
+
+p1 <- 
+  umap_data %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X, Y)) +
+  geom_point_rast(aes(UMAP_1_scaled, 
+                      UMAP_2_scaled),
+                  color = "darkgray",
+                  size = 0.1,
+                  inherit.aes = F) +
+  coord_fixed() +
+  theme_void() 
+
+p2 <-
+  umap_poly_data_colored %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+  geom_point_rast(data = umap_data %>% 
+                    filter(dataset_id == "tissue"),
+                  aes(UMAP_1_scaled, 
+                      UMAP_2_scaled),
+                  color = "darkgray",
+                  size = 0.1,
+                  inherit.aes = F) +
+  
+  geom_polygon(show.legend = F,
+               color = NA,
+               size = 0.1,
+               alpha = 0.8) +
+  scale_fill_identity() +
+  coord_fixed() +
+  theme_void() 
+
+p3 <- 
+  umap_poly_data_colored %>% 
+  filter(cluster == example_cluster$cluster) %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+  geom_point_rast(data = umap_data %>% 
+                    filter(dataset_id == "tissue"),
+                  aes(UMAP_1_scaled, 
+                      UMAP_2_scaled),
+                  color = "darkgray",
+                  size = 0.1,
+                  inherit.aes = F) +
+  
+  geom_polygon(show.legend = F,
+               color = NA,
+               size = 0.1,
+               alpha = 0.8) +
+  scale_fill_identity() +
+  coord_fixed() +
+  theme_void() 
+
+p4 <-
+  umap_poly_data_colored %>% 
+  # filter(cluster == example_cluster$cluster) %>% 
+  filter(dataset_id == "tissue") %>% 
+  {ggplot(., aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+      geom_point_rast(data = umap_data %>%
+                        filter(dataset_id == "tissue"),
+                      aes(UMAP_1_scaled,
+                          UMAP_2_scaled),
+                      color = "darkgray",
+                      size = 0.1,
+                      inherit.aes = F) +
+      
+      geom_polygon(show.legend = F,
+                   color = NA,
+                   size = 0.1,
+                   alpha = 0.8) +
+      scale_fill_identity() +
+      scale_x_continuous(limits = scales::expand_range(range(.$X[.$cluster == example_cluster$cluster]),
+                                                       2)) +
+      scale_y_continuous(limits = scales::expand_range(range(.$Y[.$cluster == example_cluster$cluster]),
+                                                       2)) +
+      coord_fixed() +
+      theme_void() }
+
+
+ggsave(savepath("UMAP example plot p1.pdf"),
+       width = 8, height = 8,
+       plot = p1)
+ggsave(savepath("UMAP example plot p2.pdf"),
+       width = 8, height = 8,
+       plot = p2)
+ggsave(savepath("UMAP example plot p3.pdf"),
+       width = 8, height = 8,
+       plot = p3)
+ggsave(savepath("UMAP example plot p4.pdf"),
+       width = 8, height = 8,
+       plot = p4)
+
+ggsave(savepath("UMAP example plot p1.png"),
+       width = 8, height = 8,
+       plot = p1)
+ggsave(savepath("UMAP example plot p2.png"),
+       width = 8, height = 8,
+       plot = p2)
+ggsave(savepath("UMAP example plot p3.png"),
+       width = 8, height = 8,
+       plot = p3)
+ggsave(savepath("UMAP example plot p4.png"),
+       width = 8, height = 8,
+       plot = p4)
+
+
+###############################################################
+
+p5 <-
+  umap_poly_data_colored %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+  geom_point_rast(data = umap_data %>%
+                    filter(dataset_id == "tissue"),
+                  aes(UMAP_1_scaled,
+                      UMAP_2_scaled),
+                  color = "darkgray",
+                  size = 0.1,
+                  inherit.aes = F) +
+  
+  
+  geom_polygon(data = . %>% 
+                 filter(cluster != example_cluster$cluster),
+               show.legend = F,
+               fill = "gray",
+               color = "black",
+               size = 0.1,
+               alpha = 0.8) +
+  geom_polygon(data = . %>% 
+                 filter(cluster == example_cluster$cluster),
+               show.legend = F,
+               color = "black",
+               size = 0.1,
+               alpha = 0.8) +
+  geom_point(data = umap_data %>% 
+               filter(dataset_id == "tissue") %>% 
+               filter(gene == example_gene),
+             aes(UMAP_1_scaled, 
+                 UMAP_2_scaled),
+             color = "red",
+             size = 3,
+             inherit.aes = F) +
+  scale_fill_identity() +
+  coord_fixed() +
+  theme_void() 
+
+ggsave(savepath("UMAP example plot p5.pdf"),
+       width = 8, height = 8,
+       plot = p5)
+
+ggsave(savepath("UMAP example plot p5.png"),
+       width = 8, height = 8,
+       plot = p5)
+
+p6 <-
+  umap_poly_data_colored %>% 
+  filter(cluster == example_cluster$cluster) %>%
+  filter(dataset_id == "tissue") %>% 
+  {ggplot(., aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+      geom_point_rast(data = umap_data %>%
+                        filter(gene %in% example_cluster_genes$gene) %>% 
+                        filter(dataset_id == "tissue"),
+                      aes(UMAP_1_scaled,
+                          UMAP_2_scaled),
+                      color = "darkgray",
+                      size = 0.1,
+                      inherit.aes = F) +
+      
+      geom_polygon(show.legend = F,
+                   color = NA,
+                   size = 0.1,
+                   alpha = 0.8) +
+      scale_fill_identity() +
+      scale_x_continuous(limits = scales::expand_range(range(.$X[.$cluster == example_cluster$cluster]),
+                                                       1)) +
+      scale_y_continuous(limits = scales::expand_range(range(.$Y[.$cluster == example_cluster$cluster]),
+                                                       1)) +
+      coord_fixed() +
+      theme_void() }
+
+ggsave(savepath("UMAP example plot p6.pdf"),
+       width = 8, height = 8,
+       plot = p6)
+
+ggsave(savepath("UMAP example plot p6.png"),
+       width = 8, height = 8,
+       plot = p6)
+
+```
+
 
 
 # Bubble heatmap
