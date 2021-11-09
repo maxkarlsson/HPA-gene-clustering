@@ -749,14 +749,37 @@ hull_data <-
            
          })
 
-hull_data %>% 
+
+hulls <- 
+  hull_data %>% 
   map(. %>% {.$hulls}) %>% 
   bind_rows(.id = "i") %>% 
   left_join(hull_settings %>% 
-              mutate(i = as.character(i))) %>% 
-  # filter(relative_bandwidth_i == 150,
-  #        dataset_id == "tissue") %>% 
-  # filter(X > 0, Y > 0) %>% 
+              mutate(i = as.character(i)))
+
+hull_centers <- 
+  hulls %>% 
+  filter(landmass == 1, sub_cluster == 1) %>% 
+  group_by(dataset_id, cluster, polygon_id) %>% 
+  summarise(X = mean(X), 
+            Y = mean(Y)) %>% 
+  ungroup()
+
+hull_centers_all <- 
+  hulls %>% 
+  group_by(dataset_id, cluster, polygon_id) %>% 
+  summarise(X = mean(X), 
+            Y = mean(Y)) %>% 
+  ungroup()
+
+hull_segments <-
+  hull_centers_all %>% 
+  left_join(hull_centers,
+            by = c("dataset_id", "cluster"),
+            suffix = c("", "end")) %>% 
+  filter(polygon_id != polygon_idend)
+  
+hulls %>% 
   ggplot(aes(X, Y, group = polygon_id, fill = cluster)) +
   geom_hex(data = umap_data %>%
              filter(dataset_id %in% hull_settings$dataset_id),
@@ -764,12 +787,22 @@ hull_data %>%
            fill = "gray70",
            bins = 200,
            inherit.aes = F) +
+  geom_segment(data = hull_segments,
+               aes(X, Y, 
+                   xend = Xend, 
+                   yend = Yend,
+                   group = cluster),
+               inherit.aes = F) +
   geom_polygon(show.legend = F,
                color = "black") +
-  facet_wrap( ~ dataset_id + 
-                relative_bandwidth_i + 
-                poly_concavity + 
-                poly_smoothing, nrow = 2) +
+  geom_point(data = hull_centers,
+             aes(X, Y), 
+             inherit.aes = F) +
+  # facet_wrap( ~ dataset_id + 
+  #               relative_bandwidth_i + 
+  #               poly_concavity + 
+  #               poly_smoothing, nrow = 2) +
+  facet_wrap( ~ dataset_id) +
   coord_fixed() +
   theme_bw() +
   
@@ -777,6 +810,11 @@ hull_data %>%
         panel.grid = element_blank())
 
 
+  
+  select(dataset_id, cluster, sub_cluster, landmass) %>% 
+  filter(cluster == 3, dataset_id == "tissue") %>% 
+  distinct()
+  group_by(dataset_id, )
 
 ############
 ############

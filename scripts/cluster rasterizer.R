@@ -38,8 +38,9 @@ generate_cluster_hulls <-
            n = 300,
            cum_z_lim = 0.95,
            frac_lim = 0.05,
-           plot_range = c(range(V1),
-                          range(V2)) * 1.05,
+           plot_range = rep(c(min(c(V1, V2)),
+                              max(c(V1, V2))),
+                            2) * 1.05,
            poly_concavity = 1,
            poly_smoothing = 1,
            relative_bandwidth = 1/200) {
@@ -110,7 +111,7 @@ generate_cluster_hulls <-
     plot_density <- 
       subclusters_classed %>% 
       filter(sub_type != "outlier") %>%
-      group_by(cluster, sub_cluster) %>%
+      group_by(cluster, sub_cluster, sub_type) %>%
       do({
         get_density(.$V1, 
                     .$V2, 
@@ -195,7 +196,7 @@ generate_cluster_hulls <-
     plot_data_hulls <- 
       plot_density_mainland_filtered %>% 
       
-      group_by(cluster, sub_cluster, landmass) %>% 
+      group_by(cluster, sub_cluster, landmass, sub_type) %>% 
       do({
         st_as_sf(., coords=c('x_coord','y_coord')) %>%
           concaveman(concavity = poly_concavity, 
@@ -206,11 +207,42 @@ generate_cluster_hulls <-
       ungroup() %>% 
       mutate(polygon_id = paste(cluster, sub_cluster, landmass, sep = "_"))
     
+    ###########################
+    
+    
+    # plot_data_hulls %>% 
+    #   filter(sub_type == "primary") %>% 
+    #   group_by(cluster) %>% 
+    #   do({
+    #     g_data <<- .
+    #     
+    #     g_data %>% 
+    #       select(X, Y) %>% 
+    #       # column_to_rownames("element_id") %>% 
+    #       dist() %>% 
+    #       as.matrix() %>% 
+    #       as_tibble() %>% 
+    #       colSums() %>% 
+    #       enframe("element_id", "sumdist") %>% 
+    #       arrange(sumdist) 
+    #       
+    #   })
+    
+    plot_density_center <- 
+      plot_density %>% 
+      filter(sub_type == "primary") %>% 
+      group_by(cluster) %>% 
+      top_n(1, z) %>% 
+      slice(1) %>% 
+      ungroup() %>% 
+      select(cluster, x = x_coord, y = y_coord)
+    
     
     
     list(hulls = plot_data_hulls,
          density = plot_density,
-         landmass_pixels = plot_density_mainland_filtered)
+         landmass_pixels = plot_density_mainland_filtered,
+         center_density = plot_density_center)
   }
 
 
