@@ -1,0 +1,169 @@
+---
+title: "annotation_report"
+author: "María Bueno Álvez"
+date: "11/9/2021"
+output: html_document
+---
+
+# Annotation report
+
+## Settings
+
+```{r}
+
+# The annotation report will be separately made for each cluster and dataset.
+# This table contains a unique ID for each combination of dataset and cluster. 
+# If we write code starting from this table, we can control all output easily. 
+annotation_report_settings <- 
+  final_cluster %>%
+  filter(dataset_id %in% c("blood_consensus", "tissue")) %>% 
+  select(dataset_id, cluster) %>% 
+  distinct() %>% 
+  arrange(dataset_id, cluster) %>% 
+  mutate(settings_id = row_number()) 
+
+
+
+dataset_metadata %>% 
+  write_csv("results/Annotation reports/dataset metadata.csv")
+
+```
+
+## Save clustering
+
+```{r}
+
+annotation_report_clustering <- 
+  annotation_report_settings %>% 
+  select(dataset_id) %>% 
+  distinct() %>% 
+  left_join(final_cluster) %>% 
+  select(dataset_id, gene, cluster)
+
+
+for(dataset_ in unique(annotation_report_clustering$dataset_id)) {
+  annotation_report_clustering %>% 
+    filter(dataset_id == dataset_) %>% 
+    select(-dataset_id) %>% 
+    write_csv(paste0("results/Annotation reports/clustering results/annotation_clustering ", dataset_, ".csv"))
+}
+```
+
+
+## Save UMAPs
+
+```{r}
+
+annotation_report_UMAP <- 
+  annotation_report_settings %>% 
+  select(dataset_id) %>% 
+  distinct() %>% 
+  left_join(all_graph_umap_data) %>% 
+  select(dataset_id, gene, UMAP_1, UMAP_2)
+
+for(dataset_ in unique(annotation_report_UMAP$dataset_id)) {
+  annotation_report_UMAP %>% 
+    filter(dataset_id == dataset_) %>% 
+    select(-dataset_id) %>% 
+    write_csv(paste0("results/Annotation reports/UMAP/annotation_UMAP_coords ", dataset_, ".csv"))
+}
+
+```
+
+
+## General clustering metrics
+
+```{r}
+
+annotation_report_general <- 
+  annotation_report_settings %>% 
+  select(dataset_id) %>% 
+  distinct() %>% 
+  left_join(final_cluster) %>% 
+  group_by(dataset_id, cluster) %>% 
+  summarise(n_genes = n_distinct(gene)) %>% 
+  ungroup()
+
+write_csv(annotation_report_general,
+          "results/Annotation reports/clustering info.csv")
+
+```
+
+
+## Expression per cluster
+
+```{r Tissue expression per cluster (pheatmaps)}
+
+# Annotation heatmaps are generated using ggheatmap, as ggplot are easier to handle than pheatmaps
+
+annotation_report_heatmaps <- 
+  unique(annotation_report_settings$dataset_id) %>% 
+  set_names(., .) %>% 
+  pblapply(function(dataset_) {
+    
+    cat(paste0(dataset_, "\n"))
+    plot_data <- 
+      all_data[[dataset_]] %>% 
+      inner_join(expressed_genes %>% 
+                   filter(dataset_id == dataset_) %>% 
+                   select(ensg_id),
+                 by = "ensg_id") %>% 
+      left_join(final_cluster %>% 
+                  filter(dataset_id == dataset_) %>% 
+                  select(gene, cluster),
+                by = c("ensg_id" = "gene")) %>% 
+      select(ensg_id, cluster, everything())
+    
+    plot_settings <- 
+      annotation_report_settings %>% 
+      filter(dataset_id == dataset_)
+    
+    plot_settings$cluster %>%
+      as.character() %>% 
+      set_names(., .) %>% 
+      lapply(function(cluster_) {
+        cat(paste0("  ", cluster_, "\n"))
+        plot_data %>%
+          filter(cluster == cluster_) %>% 
+          select(-cluster) %>% 
+          column_to_rownames("ensg_id") %>%
+          apply(MARGIN = 1,
+                function(x) x / max(x, na.rm = T)) %>% 
+          t() %>% 
+          ggheatmap(hclust_method = "ward.D2", 
+                    cluster_rows = T, 
+                    cluster_cols = T, 
+                    color = viridis(20, direction = -1, option = "B"),
+                    text_angle_cols = 90, 
+                    text_just_cols = c(1, 0.5), 
+                    text_show_rows = F, 
+                    legendName = "Relative\nexpression")
+          # pheatmap(clustering_method = "ward.D2", 
+          #          color = 
+          #          show_rownames = F,border_color = NA, fontsize = 8)
+      })
+    
+  })
+
+for(dataset_ in names(annotation_report_heatmaps)) {
+  
+  for(cluster_ in names(annotation_report_heatmaps[[dataset_]])) {
+    savename <- 
+      paste("results/Annotation reports/expression heatmaps/annotation_exp_heatmap", dataset_, cluster_)
+    
+    ggsave(annotation_report_heatmaps[[dataset_]][[cluster_]], 
+           file = paste0(savename, ".png"), 
+           width = 6, height = 5, dpi = 300)
+    
+    ggsave(annotation_report_heatmaps[[dataset_]][[cluster_]], 
+           file = paste0(savename, ".pdf"), 
+           width = 6, height = 5)
+    
+  }
+}
+
+
+
+```
+
+

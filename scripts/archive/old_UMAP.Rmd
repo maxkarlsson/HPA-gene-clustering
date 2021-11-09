@@ -1,0 +1,621 @@
+---
+title: "old_UMAP_visualization"
+author: "María Bueno Álvez"
+date: "11/9/2021"
+output: html_document
+---
+
+
+
+
+# UMAP
+## Read graphs
+```{r}
+
+# all_data_graphs <- 
+#   file_structure %>% 
+#   map(function(x)x$graph) %>% 
+#   lapply(function(filename_) readRDS(paste(filename_, "neighbors.rds", sep = "/")))
+```
+## Generate UMAP
+
+
+```{r}
+# UMAP_file <- 
+#   paste0("data/processed/", run_id, "_UMAPs.rds")
+# 
+# if(file.exists(UMAP_file)) {
+#   all_graph_umaps <- 
+#     readRDS(UMAP_file)
+# } else {
+#   
+#   all_graph_umaps <- 
+#     all_data_graphs[-5]%>% # cell line graph - ERROR
+#     pblapply(function(graph_) {
+#       graph_$snn %>% 
+#         RunUMAP(umap.method = "umap-learn") %>% 
+#         {.@cell.embeddings} %>% 
+#         as_tibble(rownames = "gene") 
+#     }) %>% 
+#     bind_rows(.id = "dataset_id")
+#   
+#   saveRDS(all_graph_umaps, UMAP_file)
+# }
+# 
+# final_cluster <- all_consensus %>% 
+#   filter(dataset_id != "celline") #resolution == 4, seed == 1
+#   
+# 
+# all_graph_umap_data <- 
+#   all_graph_umaps %>% 
+#   left_join(final_cluster) 
+# 
+# all_graph_umaps <- 
+#     all_data_graphs[[5]]$snn %>% 
+#         RunUMAP(umap.method = "umap-learn") %>% 
+#         {.@cell.embeddings} %>% 
+#         as_tibble(rownames = "gene") 
+# 
+# 
+# all_graph_umap_data %>% 
+#   ggplot(aes(UMAP_1, UMAP_2, color = as.factor(cluster))) +
+#   geom_point(show.legend = F,
+#              size = 0.1) +
+#   facet_grid(~dataset_id) +
+#   coord_fixed() +
+#   theme_bw() + 
+#   scale_color_manual(values = cluster_palette75) +
+# ggsave(run_id_savename("UMAP.pdf"),
+#        width = 8, height = 5)
+# 
+# # Scale and center UMAP coordinates:
+# all_graph_umap_data_scaled <- 
+#   all_graph_umaps %>% 
+#   gather(UMAP, UMAP_value, UMAP_1, UMAP_2) %>% 
+#   group_by(dataset_id) %>% 
+#   mutate(UMAP_value = scales::rescale(UMAP_value, c(-1, 1))) %>% 
+#   group_by(dataset_id, UMAP) %>% 
+#   mutate(UMAP_value = UMAP_value - mean(range(UMAP_value))) %>% 
+#   ungroup() %>%
+#   spread(UMAP, UMAP_value)
+# 
+# all_graph_umap_data_scaled %>% 
+#   ggplot(aes(UMAP_1, UMAP_2, color = as.factor(cluster))) +
+#   geom_point(show.legend = F,
+#              size = 0.1) +
+#   facet_grid(resolution~dataset_id) +
+#   coord_fixed() +
+#   theme_bw() + 
+#   scale_color_manual(values = cluster_palette100)
+# ggsave(run_id_savename("UMAP scaled.pdf"),
+#        width = 8, height = 5)
+# 
+# 
+# all_graph_umap_data_scaled %>% 
+#   ggplot(aes(UMAP_1, UMAP_2)) +
+#   geom_hex(aes(fill = stat(log10(count))),
+#            bins = 100) +
+#   facet_grid(~dataset_id) +
+#   coord_fixed() +
+#   theme_bw() + 
+#   scale_fill_viridis()
+# 
+# 
+# all_graph_umap_data_scaled %>% 
+#   ggplot(aes(UMAP_1, UMAP_2)) +
+#   geom_density_2d_filled(aes(fill = ifelse(unclass(..level..) < 5, 
+#                                            NA, 
+#                                            ..level..)), 
+#                          bins = 100, n = 100, 
+#                          h = 0.004) +
+#   facet_grid(~dataset_id) +
+#   coord_fixed() +
+#   theme_void() +
+#   scale_fill_viridis(name = "%", 
+#                      na.value = NA)
+# 
+# all_graph_umap_data_scaled %>% 
+#   ggplot(aes(UMAP_1, UMAP_2)) +
+#   geom_density_2d_filled(aes(fill = ifelse(unclass(..level..) < 5, 
+#                                            NA, 
+#                                            ..level..)), 
+#                          bins = 100, n = 100, 
+#                          h = 0.004 * 20) +
+#   facet_grid(~dataset_id) +
+#   coord_fixed() +
+#   theme_void() +
+#   scale_fill_viridis(name = "%", 
+#                      na.value = NA)
+
+```
+
+
+## Generate hulls
+
+```{r}
+
+# UMAP_hull_file <- 
+#   paste0("data/processed/", run_id, "_UMAP_hulls.rds")
+# 
+# if(file.exists(UMAP_hull_file)) {
+#   all_graph_umap_hulls <- 
+#     readRDS(UMAP_hull_file)
+# } else {
+#   
+#   all_graph_umap_hulls <- 
+#     all_graph_umap_data_scaled %>% 
+#     select(dataset_id) %>% 
+#     distinct() %>% 
+#     # slice(6) %>% 
+#     # slice(1, 4, 6) %>% 
+#     pull(dataset_id) %>%
+#     set_names(., .) %>% 
+#     pblapply(function(dataset_id_) {
+#       all_graph_umap_data_scaled %>% 
+#         filter(dataset_id == dataset_id_) %$%
+#         generate_cluster_hulls(UMAP_1,
+#                                UMAP_2, 
+#                                element_id = gene,
+#                                cluster_membership = factor(cluster), 
+#                                bandwidth_fct = 5,
+#                                n = 1000)
+#     })
+#   
+#   saveRDS(all_graph_umap_hulls, UMAP_hull_file)
+# }
+# 
+# all_graph_umap_hull_data <- 
+#   all_graph_umap_hulls %>% 
+#   map(. %$% 
+#         hulls) %>% 
+#   bind_rows(.id = "dataset_id")
+# 
+# 
+# rm(all_graph_umap_hulls)
+# gc()
+# # all_graph_umap_hull_data %>% 
+# #   filter(density_type == "primary secondary") %>% 
+# #   select(1, 2, 3, 4, 5) %>% 
+# #   distinct()
+# 
+# all_graph_umap_hull_data %>% 
+#   filter(density_type == "primary secondary") %>%
+#   ggplot(aes(X,Y, group = paste(cluster, sub_cluster, landmass), fill = cluster)) +
+#   geom_polygon(show.legend = F,
+#                color = "black") +
+#   theme_bw() +
+#   facet_grid(~dataset_id) +
+#   coord_fixed()
+# ggsave(run_id_savename("UMAP scaled hulls.pdf"),
+#        width = 8, height = 5)
+# 
+# 
+# # Save
+# # all_graph_umap_hull_data %>% 
+# #   filter(density_type == "primary secondary") %>% 
+# #   unite(polygon_id, cluster, sub_cluster, landmass, remove = F) %>% 
+# #   select(polygon_id, cluster, UMAP1 = X, UMAP2 = Y) %>% 
+# #   write_csv(run_id_savename("UMAP draft polygon coordinates.csv"))
+# #   
+# # 
+# # cluster_hulls$data %>% 
+# #   select(ensg_id = element_id, 
+# #          UMAP1 = V1, 
+# #          UMAP2 = V2,
+# #          cluster) %>% 
+# #   write_csv(run_id_savename("UMAP draft gene coordinates.csv"))
+
+```
+
+
+## plots
+```{r}
+
+# graph_umap_data %>% 
+#   ggplot(aes(V1, V2, color = factor(cluster))) +
+#   geom_point(size = 0.1) +
+#   scale_color_manual(values = cluster_palette) +
+#   theme_bw() +
+#   coord_fixed()
+# 
+# example_genes <- 
+#   data_cluster$cluster_data %>% 
+#   filter(resolution == 2,
+#          cluster == 14,
+#          seed == 1) %>%
+#   head(30) %>% 
+#   pull(gene)
+# 
+# data_cluster$neighbors$nn[example_genes, example_genes] %>% 
+#   {. + t(.)} %>%
+#   as.matrix() %>% 
+#   pheatmap(cluster_rows = F,
+#            cluster_cols = F,
+#            color = c("white", "gray", "black"))
+# 
+# 
+# graph_umap_edges <- 
+#   data_cluster$neighbors$snn %>%
+#   elongate_sparsemat() %>% 
+#   left_join(graph_umap_data,
+#             by= c("id1" = "gene")) %>% 
+#   left_join(graph_umap_data,
+#             by= c("id2" = "gene", "resolution", "seed"),
+#             suffix = c("1", "2")) %>%
+#   mutate(dist = sqrt(((V12 - V11) ^ 2) + 
+#                        ((V22 - V21) ^ 2))) %>%
+#     filter(id1 < id2)
+#   
+# # 
+# # graph_umap_edges %>% 
+# #   select(matches("V\\d\\d")) %>% 
+# #   as.data.frame() 
+# graph_umap_edges_filtered <- 
+#   graph_umap_edges %>% 
+#   # filter(value1 != value2) %>%
+#   filter(x > 0.25,
+#          dist > 0.01,
+#          cluster1 != cluster2)
+# 
+# graph_umap_edges_filtered %>%
+#   
+#   
+#   ggplot(aes(x = V11, xend = V12,
+#              y = V21, yend = V22)) +
+#   geom_segment() +
+#   geom_point(data = graph_umap_data,
+#              aes(V1, V2, color = factor(cluster)),
+#              size = 0.1,
+#              inherit.aes = F) +
+#   scale_color_manual(values = cluster_palette) +
+#   theme_bw()
+# 
+# 
+# g <- 
+#   graph_umap_edges_filtered %>% 
+#                       select(1,2) %>% 
+#   as.matrix() %>%
+#   graph_from_edgelist(directed = F)
+# 
+# 
+# 
+# xy <-
+#   V(g)$name %>% 
+#   enframe("i", "gene") %>% 
+#   left_join(graph_umap_data) %>%
+#   select(V1, V2) %>%
+#   as.matrix()
+# 
+# 
+# # fbundle <- 
+# #   edge_bundle_force(g,
+# #                     xy,
+# #                     compatibility_threshold = 0.1)
+# 
+# fbundle <- 
+#   edge_bundle_hammer(g,
+#                      xy, 
+#                      decay = 1,
+#                      bw = 0.075) %>%
+#   as_tibble() %>% 
+#   # filter(group == 1) %>% 
+#   left_join(graph_umap_edges_filtered %>% 
+#               mutate(group = row_number()) %>% 
+#               select(group, id1, id2, cluster1, cluster2)) %>% 
+#   left_join(cluster_palette_tbl,
+#             by = c("cluster1" = "cluster")) %>%
+#   left_join(cluster_palette_tbl,
+#             by = c("cluster2" = "cluster"),
+#             suffix = c("1", "2")) %>%
+#   mutate(color = mix_colors(color1, color2, mix = index))
+# 
+# fbundle %>%
+#   
+#   ggplot() +
+#   geom_point(data = graph_umap_data,
+#              aes(V1, V2, color = factor(cluster)),
+#              size = 0.1,
+#              inherit.aes = F) +
+#   geom_path(aes(x,y,group = group),
+#             show.legend = FALSE,
+#             alpha = 0.3)+
+#   
+#   
+#   scale_color_manual(values = cluster_palette) +
+#   theme_bw() +
+#   coord_fixed()
+# 
+# fbundle %>%
+#   
+#   ggplot() +
+#   geom_point(data = graph_umap_data %>% 
+#                mutate(cluster = as.character(cluster)) %>%
+#                left_join(cluster_palette_tbl),
+#              aes(V1, V2, color = color),
+#              size = 0.1,
+#              inherit.aes = F) +
+#   geom_path(aes(x,y,
+#                 group = group, 
+#                 color = color),
+#             show.legend = FALSE)+
+#   
+#   scale_color_identity() +
+#   # scale_color_manual(values = cluster_palette) +
+#   theme_bw() +
+#   coord_fixed()
+# 
+# fbundle %>%
+#   mutate(bundle = paste(cluster1, cluster2)) %>%
+#   filter(bundle %in% sample(unique(bundle), 20)) %>%
+#   # filter(value1 == 12, 
+#   #        value2 == 28) %>% 
+#   ggplot(aes(x, y)) +
+#   geom_path(aes(group = group, 
+#                 color = color),
+#             size = 2,
+#             show.legend = FALSE)+
+#   
+#   scale_color_identity() +
+#   facet_wrap(~bundle) +
+#   theme_bw()
+# 
+#   
+# 
+# # Calculate distance
+# distance_data <- 
+#   data_cluster$pca_data$scores %>%
+#   calculate_distance(distance_metric = "pearson") %>%
+#   {
+#     genes <- rownames(.)
+#     as.matrix(.) %>%
+#       set_colnames(genes) %>%
+#       set_rownames(genes)
+#   } %>%
+#   as.dist()
+# 
+# # Calculate neighbor graph
+# neighbors <-
+#   FindNeighbors(
+#     distance_data,
+#     k.param = 200,
+#     compute.SNN = TRUE,
+#     prune.SNN = 1/15,
+#     nn.method = "annoy", 
+#     annoy.metric = "euclidean"
+#   )
+# 
+# set.seed(42)
+# graph_umap2 <- 
+#   neighbors$snn %>%
+#   {. + t(.)} %>%
+#   umap(n_neighbors = 15)
+# 
+# graph_umap2_data <- 
+#   graph_umap2 %>% 
+#   as_tibble() %>% 
+#   mutate(gene = rownames(data_cluster$neighbors$nn)) %>% 
+#   left_join(data_cluster$cluster_data %>% 
+#               filter(resolution == 2, seed == 1)) 
+# 
+# graph_umap2_data %>% 
+#   ggplot(aes(V1, V2, color = factor(cluster))) +
+#   geom_point(size = 0.1) +
+#   scale_color_manual(values = cluster_palette) +
+#   theme_bw()
+# 
+# 
+# cluster_hulls <- 
+#   graph_umap2_data %$%
+#   generate_cluster_hulls(V1,
+#                          V2, 
+#                          element_id = gene,
+#                          cluster_membership = factor(cluster), 
+#                          n = 500)
+# 
+# cluster_hulls$data %>% 
+#   ggplot(aes(V1, V2, color = sub_type)) +
+#   geom_point(size = 0.1) + 
+#   theme_bw()
+# 
+# 
+# 
+# 
+# p1 <-
+#   cluster_hulls$data %>% 
+#   ggplot(aes(V1, V2, color = cluster)) +
+#   geom_point(size = 0.1, 
+#              show.legend = F) +
+#   theme_void() +
+#   coord_fixed() +
+#   scale_color_manual(values = cluster_palette) +
+#   ggtitle("All points")
+# 
+# p2 <-
+#   cluster_hulls$data %>% 
+#   filter(sub_type != "outlier") %>%
+#   ggplot(aes(V1, V2, color = cluster)) +
+#   geom_point(size = 0.1, 
+#              show.legend = F) +
+#   theme_void() +
+#   coord_fixed() +
+#   scale_color_manual(values = cluster_palette) +
+#   ggtitle("No outliers")
+# 
+# p3 <- 
+#   cluster_hulls$hulls %>% 
+#   filter(density_type == "primary secondary") %>%
+#   ggplot(aes(X, Y, fill = cluster, group = paste(cluster, sub_cluster, landmass))) +
+#   geom_polygon(color = "black", 
+#                show.legend = F,
+#                size = 0.1) +
+#   geom_text(data = . %>% 
+#               filter(sub_cluster == 1) %>% 
+#               group_by(cluster) %>%
+#               summarise(X = mean(X), 
+#                         Y = mean(Y)),
+#             aes(X, Y, label = cluster),
+#             inherit.aes = F) +
+#   theme_void() + 
+#   theme(axis.text = element_blank(),
+#         axis.ticks = element_blank(),
+#         panel.spacing = unit(0, "mm")) +
+#   coord_fixed() +
+#   scale_fill_manual(values = cluster_palette) +
+#   ggtitle("Complete hull")
+# 
+# 
+# p4 <- 
+#   cluster_hulls$hulls %>% 
+#   filter(density_type == "primary") %>%
+#   ggplot(aes(X, Y, fill = cluster, group = paste(cluster, sub_cluster, landmass))) +
+#   geom_polygon(color = "black", 
+#                show.legend = F,
+#                size = 0.1) +
+#   theme_void() + 
+#   theme(axis.text = element_blank(),
+#         axis.ticks = element_blank(),
+#         panel.spacing = unit(0, "mm")) +
+#   coord_fixed() +
+#   scale_fill_manual(values = cluster_palette) +
+#   ggtitle("Mainland hull")
+# 
+# 
+# p1 | p2 | p3 | p4
+# 
+# 
+# cluster_hulls$data %>% 
+#   # filter(sub_type != "outlier") %>%
+#   left_join(ensg_exp_palette,
+#             by = c("element_id" = "ensg_id")) %>% 
+#   ggplot(aes(V1, V2, color = color)) +
+#   geom_point(size = 0.1, 
+#              show.legend = F) +
+#   theme_void() +
+#   coord_fixed() +
+#   scale_color_identity() +
+#   ggtitle("No outliers")
+# 
+# 
+# plot_data <- 
+#   cluster_hulls$data %>% 
+#   filter(sub_type != "outlier") %>%
+#   left_join(ensg_exp_palette,
+#             by = c("element_id" = "ensg_id")) 
+# 
+# plot_range <- 
+#   range(c(plot_data$V1, plot_data$V2))
+# 
+# plot_n <- 300
+# 
+# pixel_width <- diff(plot_range) / plot_n
+# 
+# plot_coords <- 
+#   seq(plot_range[1],
+#       plot_range[2],
+#       length.out = plot_n) %>% 
+#   crossing(V1 = ., 
+#            V2 = .) %>%
+#   mutate(V1_start = V1 - pixel_width / 2,
+#          V1_end = V1 + pixel_width / 2,
+#          V2_start = V2 - pixel_width / 2,
+#          V2_end = V2 + pixel_width / 2)
+#   
+# 
+# plot_pixels <- 
+#   plot_coords %>% 
+#   group_by_all() %>% 
+#   do({
+#     pixel <<- .
+#     plot_data %>% 
+#       filter(V1 >= pixel$V1_start,
+#              V1 < pixel$V1_end,
+#              V2 >= pixel$V2_start,
+#              V2 < pixel$V2_end) %>% 
+#       summarise(red = mean(red),
+#                 green = mean(green),
+#                 blue = mean(blue)) 
+#   }) %>% 
+#   ungroup() %>% 
+#   mutate(red = ifelse(is.finite(red),
+#                       red,
+#                       255),
+#          green = ifelse(is.finite(green),
+#                         green,
+#                         255),
+#          blue = ifelse(is.finite(blue),
+#                        blue,
+#                        255))
+#   
+# plot_pixels %>% 
+#   mutate(color = rgb(red, green, blue, maxColorValue = 255)) %>%
+#   ggplot(aes(V1, V2, fill = color)) +
+#   geom_tile() +
+#   theme_void() +
+#   coord_fixed() +
+#   scale_fill_identity()
+# 
+# plot_span <- pixel_width/4
+# red_function <- 
+#   loess(red ~ V1:V2, data = plot_pixels, span = plot_span)
+# blue_function <- 
+#   loess(blue ~ V1:V2, data = plot_pixels, span = plot_span)
+# green_function <- 
+#   loess(green ~ V1:V2, data = plot_pixels, span = plot_span)
+# 
+# plot_predict <- 
+#   seq(plot_range[1],
+#       plot_range[2],
+#       length.out = 500) %>% 
+#   crossing(V1 = ., 
+#            V2 = .)
+# 
+# plot_canvas <- 
+#   plot_predict %>% 
+#   mutate(red = predict(red_function, newdata = .),
+#          blue = predict(blue_function, newdata = .),
+#          green = predict(green_function, newdata = .)) %>% 
+#   mutate_at(c("red", "green", "blue"), function(x) {ifelse(x > 255, 255, x)}) %>%
+#   mutate_at(c("red", "green", "blue"), function(x) {ifelse(x < 0, 0, x)}) %>%
+#   filter(complete.cases(.)) %>%
+#   mutate(color = rgb(red, green, blue, maxColorValue = 255))
+# 
+# plot_canvas %>%
+#   ggplot(aes(V1, V2, fill = color)) +
+#   geom_tile() +
+#   theme_void() +
+#   coord_fixed() +
+#   scale_fill_identity()
+# 
+# 
+# 
+# # ---- tissue contr plots -----
+# 
+# 
+# tissue_contr_data <-
+#   data %>% 
+#   group_by(ensg_id) %>% 
+#   mutate(tmm = tmm / sum(tmm)) %>% 
+#   ungroup()
+# 
+# plots <- 
+#   lapply(unique(sort(tissue_contr_data$celltype)),
+#          function(tis_) {
+#            cluster_hulls$data %>% 
+#              left_join(tissue_contr_data %>% 
+#                          filter(celltype == tis_),
+#                        by = c("element_id" = "ensg_id")) %>%
+#              ggplot(aes(V1, V2, color = tmm)) +
+#              geom_point(size = 0.1, 
+#                         show.legend = F) +
+#              theme_void() +
+#              coord_fixed() +
+#              scale_color_gradient(low = "lightgray", high = "red") +
+#              ggtitle(tis_)
+#          })
+# 
+# 
+# 
+# wrap_plots(plots)
+
+```
+

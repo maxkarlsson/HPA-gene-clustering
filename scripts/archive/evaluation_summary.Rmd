@@ -1,0 +1,1449 @@
+---
+title: "evaluation_summary"
+author: "María Bueno Álvez"
+date: "11/9/2021"
+output: html_document
+---
+
+
+```{r}
+
+
+# max_ARI <- 
+#   ARI_res %>% 
+#   group_by(dataset_id, resolution) %>% 
+#   summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+#   ungroup() %>% 
+#   group_by(dataset_id) %>% 
+#   mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0))) %>%
+#   left_join(res_k) %>% 
+#   filter(ARI_CV == 1)
+# 
+# plot_ARI_scaled <- 
+#   ARI_res %>% 
+#   group_by(dataset_id, resolution) %>% 
+#   summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+#   ungroup() %>% 
+#   group_by(dataset_id) %>% 
+#   mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0))) %>% 
+#   left_join(res_k) %>% 
+#   ggplot(aes(k, ARI_CV, color = dataset_id)) +
+#   geom_point() +
+#   geom_smooth() +
+#   theme_bw() +
+#   scale_color_manual(values = dataset_palette) +
+#   facet_grid(~dataset_id) +
+#   geom_vline(aes(xintercept=k), data = max_ARI, color = "black")+
+#   geom_label(data =max_ARI,
+#              aes(x=k,y = 1.1, label = paste(k, "clusters", sep =" "), fill = dataset_id),
+#              inherit.aes = F,
+#              size = 3,
+#              show.legend = F) +
+#   scale_fill_manual(values = dataset_palette)
+
+## GENERAL 
+clusterings <- 
+  all_clusters_consensus %>% 
+  select(-cons_cluster) %>% 
+  group_by(dataset_id, resolution, cluster) %>% 
+  mutate(size = n_distinct(gene)) %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  mutate(k = n_distinct(cluster),
+         min_size = min(size)) %>% 
+  ungroup() 
+
+# res- k table
+res_k <- 
+  clusterings %>% 
+  select(dataset_id, resolution, k) %>% 
+  distinct()
+
+# Number of clusters - resolution
+plot_k <- 
+  clusterings %>% 
+  select(dataset_id, resolution, k) %>% 
+  distinct() %>% 
+  filter(k > 30, 
+         k < 110) %>% 
+  ggplot(aes(resolution, k, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette) +
+  facet_grid(~dataset_id)
+
+# Minimum cluster size
+y_right_lims <- 
+  clusterings %>% 
+  select(dataset_id, resolution, min_size) %>% 
+  distinct() %>% 
+  group_by(dataset_id) %>% 
+  filter(min_size < 10) %>%  
+  top_n(-1, resolution) %>% 
+  inner_join(res_k)
+
+plot_minsize <- 
+  clusterings %>% 
+  select(dataset_id, resolution, k, min_size) %>% 
+  distinct() %>% 
+  ggplot(aes(k, min_size, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(show.legend = F) +
+  theme_bw() +
+ # geom_vline(aes(xintercept=k, color= dataset_id), data=y_right_lims, show.legend = F)+
+  geom_rect(aes(xmin = k, xmax = Inf, ymin = -Inf, max = Inf), data=y_right_lims,  fill = "grey", alpha = 0.4, show.legend = F, color = NA) + #fill = "white", fill = dataset_id
+  scale_color_manual(values = dataset_palette) +
+  scale_fill_manual(values = dataset_palette) +
+  facet_grid(~dataset_id)+
+  theme(
+    strip.text.x = element_text(color = "white"),
+    strip.text.y = element_text(color = "white"),
+    strip.background = element_rect(
+      color="grey35", fill="grey52")
+  ) +
+  ylab("Minimum_cluster_size")
+
+
+plot_size <- 
+  clusterings %>% 
+  select(dataset_id, resolution, k, size) %>% 
+  distinct() %>% 
+  ggplot(aes(k, size, color = dataset_id, group = k)) +
+  geom_boxplot() +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette) +
+  facet_grid(~dataset_id)
+
+## DISTANCE
+# Find out elbow -> loess model
+get_elbow <- function(x, y) {
+  d1 <- diff(y) / diff(x) # first derivative
+  d2 <- diff(d1) / diff(x[-1]) # second derivative
+  index <- which(abs(d2) == max(abs(d2)))
+  if(d1[index] > 0) {
+    
+    
+  } else {
+    num <- x[indices]
+    return(num)
+  }
+  
+#  return(num)
+#return(d1)
+  }
+
+elbow_point <- 
+  intracluster_distances %>% 
+  select(dataset_id, resolution, avg_weighted_dist) %>% 
+  distinct() %>% 
+  group_by(dataset_id) %>% 
+  do({
+    dat <- .
+    dat <- intracluster_distances %>% 
+  select(dataset_id, resolution, avg_weighted_dist) %>% 
+  distinct() %>% filter(dataset_id == "celline")
+    
+    res <- loess(dat %>% select(-dataset_id), 
+                 formula = avg_weighted_dist ~ resolution, 
+                 span = 0.5) 
+    elbow <- get_elbow(x = res$x, y = res$fitted)
+    
+    d1 <- get_elbow(x = res$x, y = res$fitted)
+    d2 <- get_elbow(x = res$x, y = res$fitted)
+
+    # data.frame(values = res$fitted,
+    #            resolution = res$x)%>% 
+    #   ggplot(aes(x = resolution, y= values)) +
+    #   geom_point() +
+    #   geom_vline(xintercept = elbow)
+    
+    data.frame(dataset_id = unique(dat$dataset_id), resolution = elbow)
+
+  })
+
+
+
+y_left_lims <- elbow_point %>% 
+  inner_join(res_k)
+
+
+plot_avg_weighted_dist <- 
+  intracluster_distances %>% 
+  select(dataset_id, resolution, avg_weighted_dist) %>% 
+  distinct() %>% 
+  left_join(res_k) %>% 
+  ggplot(aes(k, avg_weighted_dist, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(show.legend = F) +
+  theme_bw()+
+  facet_grid(~dataset_id) +
+ # geom_vline(aes(xintercept=k, color = dataset_id), data=y_left_lims, show.legend = F)+
+  geom_rect(aes(xmin = -Inf, xmax = k, ymin = -Inf, max = Inf), data=y_left_lims,  fill = "grey", alpha = 0.4, inherit.aes = F) + 
+  scale_color_manual(values = dataset_palette) +
+  ylab("UMAP_distance")
+
+plot_distances <- 
+  intracluster_distances %>% 
+  select(dataset_id, resolution, cluster, weighted_dist) %>% 
+  distinct() %>% 
+  left_join(res_k) %>% 
+  ggplot(aes(k, weighted_dist, color = dataset_id, group = k)) +
+  geom_boxplot() +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette) +
+  facet_grid(~dataset_id)
+
+# data.frame(values = res$fitted,
+#            resolution = res$x)%>% 
+#   ggplot(aes(x = resolution, y= values)) +
+#   geom_point() +
+#   geom_vline(xintercept = 3.9)
+
+
+
+## ARI
+plot_ARI <- 
+  ARI_res %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  left_join(res_k) %>% 
+  ggplot(aes(k, ARI_CV, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette) +
+  facet_grid(~dataset_id)
+
+
+plot_ARI_scaled <- 
+  ARI_res %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  ungroup() %>% 
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0))) %>% 
+  left_join(res_k) %>% 
+  ggplot(aes(k, ARI_CV, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette) +
+  facet_grid(~dataset_id)
+  
+# Mean, sd and CV
+plot_ARI_complete <- 
+  ARI_res %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_sd = sd(ARI),
+            ARI_mean = mean(ARI),
+            ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  gather(metric, value, ARI_sd:ARI_CV) %>% 
+  left_join(res_k) %>% 
+  ggplot(aes(x = k, y = value, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette) +
+  facet_grid(metric~dataset_id, scales = "free_y") +
+#  geom_vline(aes(xintercept=k), data=data = . %>% group_by(dataset, metric) %>% top_n(1,value))+
+  geom_rect(aes(xmin = k, xmax = Inf, ymin = -Inf, max = Inf), data=y_right_lims,  fill = "grey", alpha = 0.4, inherit.aes = F) +
+  geom_rect(aes(xmin = -Inf, xmax = k, ymin = -Inf, max = Inf), data=y_left_lims,  fill = "grey", alpha = 0.4, inherit.aes = F) 
+
+## MUTUAL INFORMATION
+plot_MI <- 
+  MI_res_consensus %>% 
+ # full_join(MI_R_consensus %>%  
+#  mutate(GO_domain = "reactome")) %>%
+  left_join(res_k) %>% 
+  ggplot(aes(k,z_score, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette) +
+  facet_grid(GO_domain~dataset_id, scales = "free_y")
+
+# Scaled
+plot_MI_scaled <- 
+  MI_res_consensus %>% 
+ # full_join(MI_R_consensus %>%  
+  #            mutate(GO_domain = "reactome")) %>%
+  left_join(res_k) %>% 
+  ungroup() %>% 
+  group_by(dataset_id,GO_domain) %>% 
+  mutate(z_score = scales::rescale(z_score, to = c(0,1))) %>% 
+  ungroup() %>% 
+  ggplot(aes(k,z_score, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette) +
+  facet_grid(GO_domain~dataset_id, scales = "free_y")
+
+# Averaged
+plot_MI_scaled_avg <- 
+  MI_res_consensus %>% 
+#  full_join(MI_R_consensus %>%  
+ #             mutate(GO_domain = "reactome")) %>%
+  left_join(res_k) %>% 
+  ungroup() %>% 
+  group_by(dataset_id,GO_domain) %>% 
+  mutate(z_score = scales::rescale(z_score, to = c(0,1))) %>% 
+  ungroup() %>% 
+  group_by(dataset_id,k) %>% 
+  summarise(avg_z_score = mean(z_score)) %>% 
+  ggplot(aes(k,avg_z_score, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette) +
+  facet_grid(~dataset_id, scales = "free_y")
+
+## ARI + MI 
+plot_ARI_MI <- 
+  ARI_res %>% 
+  left_join(res_k) %>% 
+  ungroup() %>% 
+  group_by(dataset_id, k) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  left_join(MI_res_consensus %>%
+   #           full_join(MI_R_consensus %>%  
+                         # mutate(GO_domain = "reactome")) %>% 
+              select(-MI, -mean_MI, -sd_MI) %>% 
+              left_join(res_k) %>% 
+              group_by(dataset_id,GO_domain) %>% 
+              mutate(z_score = scales::rescale(z_score, to = c(0,1))) %>% 
+              ungroup() %>% 
+              group_by(dataset_id, k) %>% 
+              summarise(avg_MI_zscore = mean(z_score))) %>% 
+  ungroup() %>% 
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0)),
+         avg_MI_zscore =  scales::rescale(avg_MI_zscore, to = c(0,1))) %>% 
+  ungroup() %>% 
+  gather(metric, value, ARI_CV:avg_MI_zscore) %>% 
+  ggplot(aes(x = k, y = value, group = metric, color = metric)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.5,
+              color = "black") +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw() 
+
+avg_data <- 
+   ARI_res %>% 
+  left_join(res_k) %>% 
+  ungroup() %>% 
+  group_by(dataset_id, k) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  left_join(MI_res_consensus %>%
+              #full_join(MI_R_consensus %>%  
+               #           mutate(GO_domain = "reactome")) %>% 
+              select(-MI, -mean_MI, -sd_MI) %>% 
+              left_join(res_k) %>% 
+              group_by(dataset_id,GO_domain) %>% 
+              mutate(z_score = scales::rescale(z_score, to = c(0,1))) %>% 
+              ungroup() %>% 
+              group_by(dataset_id, k) %>% 
+              summarise(avg_MI_zscore = mean(z_score))) %>% 
+  ungroup() %>% 
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0)),
+         avg_MI_zscore =  scales::rescale(avg_MI_zscore, to = c(0,1))) %>% 
+  ungroup() %>% 
+  gather(metric, value, ARI_CV:avg_MI_zscore) %>% 
+  group_by(dataset_id, k) %>% 
+  mutate(avg_value = mean(value))
+
+max_avg_data <- 
+  avg_data %>% 
+  ungroup() %>% 
+  group_by(dataset_id) %>% 
+  do({
+    dat <- .
+    dataset <- 
+      unique(dat$dataset_id)
+    
+    min_lim <- 
+      y_left_lims %>% 
+      filter(dataset_id == dataset) %>% 
+      pull(k)
+    max_lim <- 
+      y_right_lims%>% 
+      filter(dataset_id == dataset) %>% 
+      pull(k)
+    
+    if(length(min_lim) == 0) {
+      min_lim <- min(dat$k)
+    } 
+    if(length(max_lim) == 0) {
+      max_lim <- max(dat$k)
+    } 
+    
+    dat %>% 
+      select(k,avg_value) %>% 
+      distinct() %>% 
+      filter(k > min_lim,
+             k < max_lim) %>%
+      top_n(wt = avg_value,1)
+  })
+
+
+# Annotation, best clusteirng result
+annot <- max_avg_data %>% 
+  mutate(avg_value = avg_value + 0.02, label = paste0(k, " clusters"))
+
+plot_avg <- 
+  avg_data %>% 
+  ggplot(aes(x = k, y = avg_value, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.5,
+              color = "black",
+              show.legend = F) +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw() +
+  # theme(
+  #       strip.background = element_blank(),
+  #       strip.text = element_blank()) +
+  scale_color_manual(values = dataset_palette)+
+  geom_vline(aes(xintercept=k), data = max_avg_data)+
+  geom_rect(aes(xmin = k, xmax = Inf, ymin = -Inf, max = Inf), data=y_right_lims,  fill = "grey", alpha = 0.4, inherit.aes = F) +
+  geom_rect(aes(xmin = -Inf, xmax = k, ymin = -Inf, max = Inf), data=y_left_lims,  fill = "grey", alpha = 0.4, inherit.aes = F) +
+  geom_label(data =annot,
+             aes(x=k,y=avg_value + 0.1, label = label, fill = dataset_id),
+             inherit.aes = F,
+             size = 3,
+             show.legend = F) +
+  scale_fill_manual(values = dataset_palette %>% map(~adjust_transparency(.x, alpha = 0.6)) %>% unlist())
+
+
+####
+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank())
+  
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank())+
+    geom_text(data = max_avg_data %>% 
+                mutate(label = paste0(k, " clusters")),
+              mapping = aes(x = k, y = 1, label = label),
+              inherit.aes = F,
+              hjust = 1,
+              vjust = 0) 
+theme(
+   strip.text.x = element_text(color = "white"),
+      strip.text.y = element_text(color = "white"),
+
+      strip.background = element_rect(
+     color="grey35", fill="grey32")
+   )
+
+p1 <- plot_avg_weighted_dist +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+         strip.background = element_rect(
+     color="grey35", fill="grey42"),
+   
+          strip.text = element_text(color = "white"))
+p2 <- plot_minsize +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank())
+p3 <- plot_avg +
+  ylab("Scaled_performance") +
+  theme(strip.background = element_blank(),
+        strip.text = element_blank()) +
+  xlab("Number of clusters (k)")
+  
+p1 / p2 / p3 +
+    plot_layout(guides = "collect")
+
+p1 / p2 / p4 / p5 /  p3 +
+    plot_layout(guides = "collect")
+
+
+
+p5 <- plot_MI_scaled_avg +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank())
+p4 <- plot_ARI_scaled +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank())
+####
+
+library(ggiraph)
+library(gfonts)
+setup_font(
+  id = "open-sans", 
+  output_dir = "fonts", 
+  variants = c("regular", "italic", "700", "700italic"), 
+  prefer_local_source = FALSE)
+
+font_family_exists("Open Sans")
+font_add_google(name = "OpenSans Light", family = "Open Sans")
+
+
+
+
+ARI_res %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI = mean(ARI)) %>% 
+  ggplot(aes(x = resolution, y =ARI, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  facet_grid(~dataset_id) +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+  
+
+max_ARI <- 
+  ARI_res %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  ungroup() %>% 
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0))) %>%
+  left_join(res_k) %>% 
+  filter(ARI_CV == 1)
+
+plot_ARI_scaled <- 
+  ARI_res %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  ungroup() %>% 
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0))) %>% 
+  left_join(res_k) %>% 
+  ggplot(aes(k, ARI_CV, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette) +
+  facet_grid(~dataset_id) +
+  geom_vline(aes(xintercept=k), data = max_ARI, color = "black")+
+  geom_label(data =max_ARI,
+             aes(x=k,y = 1.1, label = paste(k, "clusters", sep =" "), fill = dataset_id),
+             inherit.aes = F,
+             size = 3,
+             show.legend = F) +
+  scale_fill_manual(values = dataset_palette)
+  
+
+```
+
+
+```{r}
+all_clusters_consensus %>%
+  group_by(dataset_id, resolution, cluster) %>% 
+  summarise(size = n_distinct(gene)) %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(min_size = min(size),
+            k = n_distinct(cluster)) %>%
+  filter(k > 30,
+         k < 100) %>% 
+  ggplot(aes(x = k, y = min_size, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +  
+  facet_grid(~dataset_id, scale = "free_y") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+  
+
+intracluster_distances %>% 
+  as_tibble() %>% 
+  #inner_join(filt_res) %>% 
+  select(dataset_id,resolution, min_size) %>% 
+  distinct() %>% 
+  ggplot(aes(x = resolution, y = min_size, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +  
+  facet_grid(~dataset_id, scale = "free_y") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+
+# filt_res <- 
+#   data_cluster %>%  
+#   select(dataset_id, resolution, resolution_k) %>% 
+#   distinct()
+
+p1 <- intracluster_distances %>% 
+  as_tibble() %>% 
+ # inner_join(filt_res) %>% 
+  select(dataset_id,resolution,avg_weighted_dist) %>% 
+  distinct() %>% 
+  ggplot(aes(x = resolution, y = avg_weighted_dist, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +  
+  facet_grid(~dataset_id, scale = "free_y") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette) +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank())
+  
+p2 <- intracluster_distances %>% 
+  as_tibble() %>% 
+  #inner_join(filt_res) %>% 
+  select(dataset_id,resolution, min_size) %>% 
+  distinct() %>% 
+  ggplot(aes(x = resolution, y = min_size, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +  
+  facet_grid(~dataset_id, scale = "free_y") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank())
+  
+
+p3 <-  ARI_res %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI))%>% 
+     # inner_join(filt_res) %>% 
+  ggplot(aes(x = resolution, y = ARI_CV, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw()+
+  scale_color_manual(values = dataset_palette)+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank())
+  
+  
+p4 <- MI_res_consensus %>% 
+              select(-MI, -mean_MI, -sd_MI) %>% 
+              group_by(dataset_id,GO_domain) %>% 
+              mutate(z_score = scales::rescale(z_score, to = c(0,1))) %>% 
+              ungroup() %>% 
+              group_by(dataset_id, resolution) %>% 
+              mutate(avg_MI_zscore = mean(z_score)) %>% 
+              select(-GO_domain, -z_score) %>% 
+              distinct()  %>% 
+      #inner_join(filt_res) %>% 
+  ggplot(aes(x = resolution, y = avg_MI_zscore, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw()+
+  scale_color_manual(values = dataset_palette)+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank())
+
+p5 <-  ARI_res %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  left_join(MI_res_consensus %>% 
+              select(-MI, -mean_MI, -sd_MI) %>% 
+              group_by(dataset_id,GO_domain) %>% 
+              mutate(z_score = scales::rescale(z_score, to = c(0,1))) %>% 
+              ungroup() %>% 
+              group_by(dataset_id, resolution) %>% 
+              mutate(avg_MI_zscore = mean(z_score)) %>% 
+              select(-GO_domain, -z_score) %>% 
+              distinct()) %>% 
+ # inner_join(filt_res) %>%
+  ungroup() %>% 
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0)),
+         avg_MI_zscore =  scales::rescale(avg_MI_zscore, to = c(0,1))) %>% 
+  ungroup() %>% 
+  gather(metric, value, ARI_CV:avg_MI_zscore) %>% 
+  ggplot(aes(x = resolution, y = value, group = metric, color = metric)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.5,
+              color = "black") +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw()+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank())
+  
+p6 <-  ARI_res %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  left_join(MI_res_consensus %>% 
+              select(-MI, -mean_MI, -sd_MI) %>% 
+              group_by(dataset_id,GO_domain) %>% 
+              mutate(z_score = scales::rescale(z_score, to = c(0,1))) %>% 
+              ungroup() %>% 
+              group_by(dataset_id, resolution) %>% 
+              mutate(avg_MI_zscore = mean(z_score)) %>% 
+              select(-GO_domain, -z_score) %>% 
+              distinct()) %>% 
+  #inner_join(filt_res) %>%
+  ungroup() %>% 
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0)),
+         avg_MI_zscore =  scales::rescale(avg_MI_zscore, to = c(0,1))) %>% 
+  ungroup() %>% 
+  gather(metric, value, ARI_CV:avg_MI_zscore) %>% 
+  group_by(dataset_id, resolution) %>% 
+  mutate(avg_value = mean(value)) %>% 
+  ggplot(aes(x = resolution, y = avg_value, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.5,
+              color = "black") +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw()+
+  theme(
+        strip.background = element_blank(),
+        strip.text = element_blank()) +
+    scale_color_manual(values = dataset_palette)
+
+p1 / p2 / p3 / p4 / p5 / p6 +
+  plot_layout(heights = unit(c(2.5, 2.5, 2.5, 2.5, 2.5, 2.5), "cm"),guides = "collect")
+
+
+p1 / p2 / p5 / p6+
+  plot_layout(heights = unit(c(2.5, 2.5, 2.5, 2.5), "cm"),guides = "collect")
+####
+p3_2 <-  ARI_res %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_sd = sd(ARI),
+            ARI_avg = mean(ARI),
+            ARI_CV = sd(ARI) / mean(ARI))%>% 
+      inner_join(filt_res) %>% 
+  gather(metric, value, ARI_sd:ARI_CV) %>% 
+  ggplot(aes(x = resolution_k, y = value, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +
+  facet_grid(metric~dataset_id,scales = "free_y") +
+  theme_bw()+
+  scale_color_manual(values = dataset_palette)+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank())
+  
+  
+p4_2 <- MI_res_consensus %>% 
+      inner_join(filt_res) %>% 
+  ggplot(aes(x = resolution_k, y = z_score, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +
+  facet_grid(GO_domain~dataset_id, scales = "free_y") +
+  theme_bw()+
+  scale_color_manual(values = dataset_palette)+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank())
+
+p1 / p2 / p3_2/ p4_2 / p6+
+  plot_layout(heights = unit(c(2, 2, 6, 6, 2), "cm"),guides = "collect")
+
+
+p4_3 <- MI_res_consensus %>% 
+      inner_join(filt_res) %>% 
+  ggplot(aes(x = resolution_k, y = z_score, group = GO_domain, color = GO_domain)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +
+  facet_grid(~dataset_id, scales = "free_y") +
+  theme_bw()+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank())
+
+p1 / p2 / p3_2/ p4_3 / p6+
+  plot_layout(heights = unit(c(2, 2, 6, 2, 2), "cm"),guides = "collect")
+
+
+###
+p6 <- ARI_res %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  left_join(MI_res_consensus %>% 
+              select(-MI, -mean_MI, -sd_MI) %>% 
+              group_by(dataset_id,GO_domain) %>% 
+              mutate(z_score = (zscore - mean(zscore)) / sd(zscore)) %>% 
+              ungroup() %>% 
+              group_by(dataset_id, resolution) %>% 
+              mutate(avg_MI_zscore = mean(z_score)) %>% 
+              select(-GO_domain, -z_score) %>% 
+              distinct()) %>% 
+  inner_join(filt_res) %>%
+  ungroup() %>% 
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  (ARI_CV - mean(ARI_CV)) / sd(ARI_CV),
+         avg_MI_zscore =  (avg_MI_zscore - mean(avg_MI_zscore)) / sd(avg_MI_zscore)) %>% 
+  ungroup() %>% 
+  gather(metric, value, ARI_CV:avg_weighted_dist) %>% 
+  ggplot(aes(x = resolution, y = value, group = metric, color = metric)) +
+  geom_point() +
+  geom_smooth() +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw()
+  
+  
+p5 / p6
+
+## ZSCORES
+
+p1 <- eval_gene_distances %>% 
+  inner_join(filt_res) %>% 
+  select(dataset_id,resolution,avg_weighted_dist) %>% 
+  distinct() %>% 
+  ggplot(aes(x = resolution, y = avg_weighted_dist, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +  
+  facet_grid(~dataset_id, scale = "free_y") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+  
+p2 <- eval_gene_distances %>% 
+  inner_join(filt_res) %>% 
+  select(dataset_id,resolution, min_size) %>% 
+  distinct() %>% 
+  ggplot(aes(x = resolution, y = min_size, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +  
+  facet_grid(metric~dataset_id, scale = "free_y") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+  
+  
+p3 <-  ARI_res %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI))%>% 
+  ggplot(aes(x = resolution, y = ARI_CV, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw()+
+  scale_color_manual(values = dataset_palette)
+  
+  
+p4 <- MI_res_consensus %>% 
+              select(-MI, -mean_MI, -sd_MI) %>% 
+              group_by(dataset_id,GO_domain) %>% 
+              mutate(z_score = scales::rescale(z_score, to = c(0,1))) %>% 
+              ungroup() %>% 
+              group_by(dataset_id, resolution) %>% 
+              mutate(avg_MI_zscore = mean(z_score)) %>% 
+              select(-GO_domain, -z_score) %>% 
+              distinct()  %>% 
+  ggplot(aes(x = resolution, y = avg_MI_zscore, color = dataset_id)) +
+  geom_point() +
+  geom_smooth() +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw()+
+  scale_color_manual(values = dataset_palette)
+
+p5 <-  ARI_res %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  left_join(MI_res_consensus %>% 
+              select(-MI, -mean_MI, -sd_MI) %>% 
+              group_by(dataset_id,GO_domain) %>% 
+              mutate(z_score = scales::rescale(z_score, to = c(0,1))) %>% 
+              ungroup() %>% 
+              group_by(dataset_id, resolution) %>% 
+              mutate(avg_MI_zscore = mean(z_score)) %>% 
+              select(-GO_domain, -z_score) %>% 
+              distinct()) %>% 
+  inner_join(filt_res) %>%
+  ungroup() %>% 
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0)),
+         avg_MI_zscore =  scales::rescale(avg_MI_zscore, to = c(0,1))) %>% 
+  ungroup() %>% 
+  gather(metric, value, ARI_CV:avg_weighted_dist) %>% 
+  ggplot(aes(x = resolution, y = value, group = metric, color = metric)) +
+  geom_point() +
+  geom_smooth() +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw()
+  
+  
+p1 / p2 / p3 / p4 / p5 +
+  plot_layout(heights = unit(c(2.5, 2.5, 2.5, 2.5), "cm"))
+
+####
+
+
+
+
+
+
+filt_res <- 
+  data_cluster %>%  
+  select(dataset_id, resolution, resolution_k) %>% 
+  distinct()
+
+all_metrics <- 
+  ARI_res %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_CV = sd(ARI) / mean(ARI)) %>% 
+  left_join(MI_res_consensus %>% 
+              select(-MI, -mean_MI, -sd_MI) %>% 
+              group_by(dataset_id,GO_domain) %>% 
+              mutate(z_score = scales::rescale(z_score, to = c(0,1))) %>% 
+              ungroup() %>% 
+              group_by(dataset_id, resolution) %>% 
+              mutate(avg_MI_zscore = mean(z_score)) %>% 
+              select(-GO_domain, -z_score) %>% 
+              distinct()) %>% 
+  left_join(intracluster_distances %>% 
+              as_tibble() %>% 
+              select(dataset_id, resolution, avg_weighted_dist) %>% 
+              distinct()) %>% 
+    inner_join(filt_res) 
+
+all_metrics %>%
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0)),
+         avg_weighted_dist =  scales::rescale(avg_weighted_dist, to = c(1,0)),
+         avg_MI_zscore =  scales::rescale(avg_MI_zscore, to = c(0,1))) %>% 
+  ungroup() %>% 
+  gather(metric, value, ARI_CV:avg_weighted_dist) %>% 
+  ggplot(aes(x = resolution, y = value, group = metric, color = metric)) +
+  geom_point() +
+  geom_smooth() +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw()
+
+avg_plot <- 
+  all_metrics %>%
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0)),
+         avg_weighted_dist =  scales::rescale(avg_weighted_dist, to = c(1,0)),
+         avg_MI_zscore =  scales::rescale(avg_MI_zscore, to = c(0,1))) %>% 
+  ungroup() %>% 
+  gather(metric, value, ARI_CV:avg_weighted_dist) %>% 
+  group_by(dataset_id,resolution) %>% 
+  mutate(avg_score = mean(value)) %>%
+  ungroup() %>% 
+  select(-value) %>% 
+  distinct() %>% 
+  ggplot(aes(x = resolution_k, y = avg_score, group = metric, color = metric)) +
+  geom_point() +
+  geom_smooth(method = "loess", 
+              span = 0.5) +
+  facet_wrap(~dataset_id, ncol=5) +
+  theme_bw()
+
+
+
+# Ranking
+all_metrics %>%
+  group_by(dataset_id) %>% 
+  mutate(ARI_CV =  scales::rescale(ARI_CV, to = c(1,0)),
+         avg_weighted_dist =  scales::rescale(avg_weighted_dist, to = c(1,0)),
+         avg_MI_zscore =  scales::rescale(avg_MI_zscore, to = c(0,1))) %>% 
+  ungroup() %>% 
+  gather(metric, value, ARI_CV:avg_weighted_dist) %>% 
+  group_by(dataset_id,resolution) %>% 
+  mutate(avg_score = mean(value)) %>%
+  ungroup() %>% 
+  group_by(dataset_id) %>% 
+  top_n(avg_score, n = 1) %>% 
+  spread(key = metric, value = value)
+
+#Cluster sizes
+intracluster_distances %>% 
+  as_tibble() %>% 
+  select(dataset_id, resolution, cluster, n_genes, min_size, max_size) %>% 
+  arrange(n_genes)
+  ggplot(aes(x = resolution, y = n_genes, group = resolution)) +
+  geom_violin() +
+  facet_wrap(~dataset_id, ncol = 5)
+
+
+ARI_res %>% 
+  inner_join(filt_res) %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_mean = mean(ARI),
+            ARI_sd = sd(ARI),
+            CV = ARI_sd / ARI_mean,
+            resolution_k) %>% 
+  gather(metric, value, ARI_mean:CV) %>% 
+  ggplot(aes(x = resolution_k, y = value)) +
+  geom_point() +
+  geom_smooth(method = "loess", 
+              span = 0.25) +
+  facet_grid(metric~dataset_id, scale = "free")
+
+
+
+p1 <- ARI_res %>% 
+  ungroup() %>% 
+  inner_join(filt_res) %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_mean = mean(ARI),
+            ARI_sd = sd(ARI),
+            CV = ARI_sd / ARI_mean) %>% 
+  ungroup() %>% 
+  gather(metric, value, ARI_mean:CV) %>% 
+  ggplot(aes(resolution, value, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +
+  facet_grid(metric~dataset_id, scales = "free_y") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)  #+
+# ggtitle("Replicate clustering stability")
+
+p2 <- MI_res_consensus %>%
+  inner_join(filt_res) %>% 
+  ggplot(aes(resolution, z_score, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +
+  facet_grid(GO_domain ~ dataset_id, scales = "free_y") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+
+p3 <- eval_gene_distances %>% 
+  inner_join(filt_res) %>% 
+  select(dataset_id,resolution,avg_weighted_dist, min_size) %>% 
+  gather(metric, value, avg_weighted_dist:min_size) %>% 
+  distinct() %>% 
+  ggplot(aes(x = resolution, y = value, color = dataset_id)) +
+  geom_point(size = 1) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +  
+  facet_grid(metric~dataset_id, scale = "free_y") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+
+
+p1 / p2 / p3 +
+  plot_layout(heights = unit(c(7.5, 7.5, 5), "cm"))
+
+
+
+
+
+
+
+
+
+########## 
+p1 <- ARI_res %>% 
+  ungroup() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(ARI_mean = mean(ARI),
+            ARI_sd = sd(ARI),
+            CV = ARI_sd / ARI_mean) %>% 
+  ungroup() %>% 
+  ggplot(aes(resolution, CV)) +
+  geom_point() +
+  geom_smooth() +
+  facet_wrap(~dataset_id, ncol = 5)
+
+  ggplot(aes(resolution, ARI, color = dataset_id, group = dataset_id)) +
+  geom_point(data = . %>% 
+               group_by(dataset_id, resolution) %>%
+               summarise(ARI = mean(ARI))) +
+  # geom_boxplot(aes(group = resolution), color = "black") +
+  # geom_line(color = "black") + 
+  geom_segment(data = ARI_res %>% 
+                 group_by(dataset_id, resolution) %>% 
+                 summarise(ARI_mean = mean(ARI),
+                           ARI_sd = sd(ARI)) %>% 
+                 ungroup() %>% 
+                 mutate(min_y = ARI_mean - 2*ARI_sd,
+                        max_y = ARI_mean + 2*ARI_sd) %>% 
+                 distinct(),
+               aes(x = resolution, xend = resolution,
+                   y = min_y, yend = max_y)) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +
+  facet_wrap(~dataset_id, ncol = 6)  +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)  #+
+ # ggtitle("Replicate clustering stability")
+
+p2 <- MI_res_consensus %>%
+  ggplot(aes(resolution, z_score, color = GO_domain)) +
+  geom_point() +
+  geom_smooth(method = "loess",
+              span = 0.25) +
+  facet_grid( ~ dataset_id, scales = "free_y") + # GO_domain
+  theme_bw() #+
+  #ggtitle("Mutual information")
+
+
+p3 <- eval_gene_distances %>% 
+  select(-dist,-n_genes,-total_genes, -weighted_dist, -avg_weighted_dist) %>% 
+  select(-cluster) %>% 
+  distinct() %>% 
+  gather(metric, value, min_size, max_size, avg_size) %>% 
+  ggplot(aes(x = resolution, y = value, color = metric)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  facet_grid(~dataset_id)
+
+p4 <- eval_gene_distances %>% 
+  select(dataset_id,resolution,avg_weighted_dist) %>% 
+  distinct() %>% 
+  ggplot(aes(x = resolution, y = avg_weighted_dist, color = dataset_id)) +
+  geom_point() +
+  geom_smooth(method = "loess",
+              span = 0.25) +  
+  facet_grid(~dataset_id, scale = "free_y") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+  
+p1 / p2 / p3 / p4
+
+## Resolutions SEPARATED
+
+p1 <- ARI_res %>% 
+  
+  ggplot(aes(resolution, ARI, color = dataset_id, group = dataset_id)) +
+  geom_point(data = . %>% 
+               group_by(dataset_id, resolution) %>%
+               summarise(ARI = mean(ARI))) +
+  # geom_boxplot(aes(group = resolution), color = "black") +
+  # geom_line(color = "black") + 
+  geom_segment(data = ARI_res %>% 
+                 group_by(dataset_id, resolution) %>% 
+                 summarise(ARI_mean = mean(ARI),
+                           ARI_sd = sd(ARI)) %>% 
+                 ungroup() %>% 
+                 mutate(min_y = ARI_mean - 2*ARI_sd,
+                        max_y = ARI_mean + 2*ARI_sd),
+               aes(x = resolution, xend = resolution,
+                   y = min_y, yend = max_y)) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +
+  facet_wrap(~dataset_id, ncol = 6)  +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)  #+
+ # ggtitle("Replicate clustering stability")
+
+p2 <- MI_res_consensus %>%
+  ggplot(aes(resolution, z_score, color = GO_domain)) +
+  geom_point() +
+  geom_smooth(method = "loess",
+              span = 0.25) +
+  facet_grid(GO_domain ~ dataset_id, scales = "free") + # GO_domain
+  theme_bw() #+
+  #ggtitle("Mutual information")
+
+
+p3 <- eval_gene_distances %>% 
+  select(-dist,-n_genes,-total_genes, -weighted_dist, -avg_weighted_dist) %>% 
+  select(-cluster) %>% 
+  distinct() %>% 
+  gather(metric, value, min_size, max_size, avg_size) %>% 
+  ggplot(aes(x = resolution, y = value, color = metric)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  facet_grid(metric~dataset_id, scale = "free")
+
+p4 <- eval_gene_distances %>% 
+  select(dataset_id,resolution,avg_weighted_dist) %>% 
+  distinct() %>% 
+  ggplot(aes(x = resolution, y = avg_weighted_dist, color = dataset_id)) +
+  geom_point() +
+  geom_smooth(method = "loess",
+              span = 0.25) +  
+  facet_grid(~dataset_id, scale = "free_y") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+  
+
+
+p1 / p2 / p3 / p4 +
+  plot_layout(heights = unit(c(2.5, 7.5, 7.5, 2.5), "cm"))
+
+
+## Number of clusters
+
+num_clusters <- 
+  eval_gene_distances %>% 
+  select(dataset_id, resolution,cluster) %>% 
+  group_by(dataset_id,resolution) %>% 
+  summarize(k = n_distinct(cluster)) 
+
+num_clusters %>% 
+  ggplot(aes(resolution, k, color = dataset_id)) +
+  geom_point(show.legend = F) +
+  facet_grid(~dataset_id) +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+
+#write_csv(num_clusters, "num_clusters.csv")
+
+p1 <- ARI_res %>% 
+  left_join(num_clusters) %>% 
+  group_by(dataset_id, resolution) %>%
+  mutate(k= median(k)) %>% 
+  summarise(ARI = mean(ARI), k) %>% 
+  distinct() %>% 
+  ggplot(aes(k, ARI, color = dataset_id, group = dataset_id)) +
+  geom_point() + 
+  geom_segment(data = ARI_res %>% 
+                 left_join(num_clusters) %>% 
+                 group_by(dataset_id, resolution) %>% 
+                   mutate(k= median(k)) %>% 
+                 summarise(ARI_mean = mean(ARI),
+                           ARI_sd = sd(ARI),
+                           k) %>% 
+                 ungroup() %>% 
+                 mutate(min_y = ARI_mean - 2*ARI_sd,
+                        max_y = ARI_mean + 2*ARI_sd),
+               aes(x = k, xend = k,
+                   y = min_y, yend = max_y)) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +
+  facet_wrap(~dataset_id, ncol = 6, scale = "free_x")  +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)  #+
+# ggtitle("Replicate clustering stability")
+
+p2 <- MI_res_consensus %>%
+  left_join(num_clusters) %>% 
+  ggplot(aes(k, z_score, color = GO_domain)) +
+  geom_point() +
+  geom_smooth(method = "loess",
+              span = 0.25) +
+  facet_grid( ~ dataset_id, scales = "free_x") + # GO_domain
+  theme_bw() #+
+  #ggtitle("Mutual information")
+
+
+p3 <- eval_gene_distances %>% 
+  left_join(num_clusters) %>% 
+  select(-dist,-n_genes,-total_genes, -weighted_dist, -avg_weighted_dist) %>% 
+  select(-cluster) %>% 
+  distinct() %>% 
+  gather(metric, value, min_size, max_size, avg_size) %>% 
+  ggplot(aes(x = k, y = value, color = metric)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  facet_grid(~dataset_id, scale = "free_x")
+
+p4 <- eval_gene_distances %>% 
+  left_join(num_clusters) %>% 
+  select(dataset_id,k,avg_weighted_dist) %>% 
+  distinct() %>% 
+  ggplot(aes(x = k, y = avg_weighted_dist, color = dataset_id)) +
+  geom_point() +
+  geom_smooth(method = "loess",
+              span = 0.25) +  
+  facet_grid(~dataset_id, scale = "free_x") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+  
+
+p1 / p2 / p3 / p4
+
+
+
+
+
+## Number of clusters - SEPARATED
+
+num_clusters <- 
+  eval_gene_distances %>% 
+  select(dataset_id, resolution,cluster) %>% 
+  group_by(dataset_id,resolution) %>% 
+  summarize(k = n_distinct(cluster)) 
+
+p1 <- ARI_res %>% 
+  left_join(num_clusters) %>% 
+  group_by(dataset_id, resolution) %>%
+  mutate(k= median(k)) %>% 
+  summarise(ARI = mean(ARI), k) %>% 
+  distinct() %>% 
+  ggplot(aes(k, ARI, color = dataset_id, group = dataset_id)) +
+  geom_point() + 
+  geom_segment(data = ARI_res %>% 
+                 left_join(num_clusters) %>% 
+                 group_by(dataset_id, resolution) %>% 
+                   mutate(k= median(k)) %>% 
+                 summarise(ARI_mean = mean(ARI),
+                           ARI_sd = sd(ARI),
+                           k) %>% 
+                 ungroup() %>% 
+                 mutate(min_y = ARI_mean - 2*ARI_sd,
+                        max_y = ARI_mean + 2*ARI_sd),
+               aes(x = k, xend = k,
+                   y = min_y, yend = max_y)) +
+  geom_smooth(method = "loess", 
+              span = 0.25,
+              color = "black") +
+  facet_wrap(~dataset_id, ncol = 6, scale = "free_x")  +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)  #+
+# ggtitle("Replicate clustering stability")
+
+p2 <- MI_res_consensus %>%
+  left_join(num_clusters) %>% 
+  ggplot(aes(k, z_score, color = GO_domain)) +
+  geom_point() +
+  geom_smooth(method = "loess",
+              span = 0.25) +
+  facet_grid(GO_domain ~ dataset_id, scales = "free") + # GO_domain
+  theme_bw() #+
+  #ggtitle("Mutual information")
+
+
+p3 <- eval_gene_distances %>% 
+  left_join(num_clusters) %>% 
+  select(-dist,-n_genes,-total_genes, -weighted_dist, -avg_weighted_dist) %>% 
+  select(-cluster) %>% 
+  distinct() %>% 
+  gather(metric, value, min_size, max_size, avg_size) %>% 
+  ggplot(aes(x = k, y = value, color = metric)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  facet_grid(metric~dataset_id, scale = "free")
+
+p4 <- eval_gene_distances %>% 
+  left_join(num_clusters) %>% 
+  select(dataset_id,k,avg_weighted_dist) %>% 
+  distinct() %>% 
+  ggplot(aes(x = k, y = avg_weighted_dist, color = dataset_id)) +
+  geom_point() +
+  geom_smooth(method = "loess",
+              span = 0.25) +  
+  facet_grid(~dataset_id, scale = "free_x") +
+  theme_bw() +
+  scale_color_manual(values = dataset_palette)
+  
+
+p1 / p2 / p3 / p4 +
+  plot_layout(heights = unit(c(2.5, 7.5, 7.5, 2.5), "cm"))
+
+
+
+
+###################
+
+# Change UMAP step in the pipeline to add evaluation
+umaps_scaled_clusterings <- 
+  all_graph_umap_data_scaled %>% 
+  left_join(all_data_cluster %>% 
+  filter(dataset_id %in% c("blood", "brain", "singlecell", "tissue", "celline_consensus")))
+
+umap_dist <- 
+  umaps_scaled_clusterings %>% 
+  group_by(dataset_id,resolution,cluster,seed) %>% 
+  do({
+    dat <<- .
+    
+    dat %>% 
+      select(gene,UMAP_1,UMAP_2) %>%
+      column_to_rownames("gene") %>% 
+      dist() %>%
+      as.matrix() %>% 
+      as_tibble(rownames = "gene1") %>% 
+      gather(gene2,dist,-1) %>% 
+      filter(gene1 < gene2) %>% 
+      summarise(dist = mean(dist), 
+                n_genes = n_distinct(dat$gene))
+  })
+
+plot_data <- 
+  umap_dist %>% 
+  group_by(dataset_id,resolution) %>% 
+  mutate(total_genes = sum(n_genes)) %>% 
+  ungroup() %>% 
+  mutate(weighted_dist = dist * n_genes / total_genes)
+  
+plot_data %>% 
+  group_by(dataset_id,resolution) %>% 
+  summarise(mean_dist = mean(dist, na.rm = T), 
+            max_dist = max(dist, na.rm = T),
+            intracluster_dist = sum(weighted_dist, na.rm = T)) %>% 
+  gather(metric, value, mean_dist, max_dist, intracluster_dist) %>% 
+  ggplot(aes(x = resolution, y = value)) +
+  geom_point() +
+  geom_smooth() +
+  facet_grid(metric ~ dataset_id, scale = "free_y")
+
+plot_data %>% 
+  group_by(dataset_id,resolution) %>% 
+  summarise(mean_dist = mean(dist, na.rm = T), 
+            max_dist = max(dist, na.rm = T),
+            intracluster_dist = sum(weighted_dist, na.rm = T)) %>% 
+  ggplot(aes(mean_dist, intracluster_dist, color = dataset_id)) +
+  geom_point() +
+  geom_abline() +
+  coord_fixed()
+
+
+# Evaluation summary (stability, number of clusters, MI, UMAP)
+all_data_cluster %>% 
+  group_by(dataset_id, resolution) %>%  
+  summarize(k = max(cluster)) %>% 
+  left_join(ARI_res %>% select(-seed1,-seed2)) %>% 
+  gather(key="measure", value = "value", -dataset_id, -resolution) %>%
+  distinct() %>% 
+  full_join(all_data_cluster_MI %>% 
+              select(-MI,-mean_MI,-sd_MI, -seed) %>% 
+              mutate(GO_domain = paste("MI_", GO_domain, "")) %>% 
+              rename(measure = GO_domain,
+                     value = z_score)) %>% 
+  # Manually filter current datasets
+  filter(dataset_id %in% c("blood", "brain", "celline_consensus", "singlecell", "tissue")) %>% 
+  ggplot(aes(x = resolution, y = value, color = dataset_id)) +
+  geom_point(size = 0.5) +
+  geom_smooth() +
+  theme_bw() +
+  facet_grid(measure~dataset_id, scales = "free_y") +
+  scale_color_manual(values = dataset_palette) 
+
+ggsave("eval_MI_BP_MF_CC_allseeds_HPAcolors.pdf",
+       width = 10, height = 10)
+
+```
+
+
