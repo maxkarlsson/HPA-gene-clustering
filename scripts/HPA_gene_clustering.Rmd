@@ -1275,7 +1275,6 @@ graph_umaps_hulls <-
   partition(cluster) %>% 
   do({
     g_data <- .
-    
     g_dataset_id <- 
       unique(g_data$dataset_id)
     
@@ -1283,6 +1282,8 @@ graph_umaps_hulls <-
       paste(file_structure[[g_dataset_id]]$UMAP, "UMAP_polygons.tsv", sep = "/")
     savefile_UMAP_hulls<- 
       paste(file_structure[[g_dataset_id]]$UMAP, "UMAP_hulls.rds", sep = "/")
+    savefile_cluster_center <- 
+      paste(file_structure[[g_dataset_id]]$UMAP, "cluster_centers.tsv", sep = "/")
     
     if(file.exists(savefile_UMAP_hulls)) {
       UMAP_hulls <-
@@ -1303,6 +1304,7 @@ graph_umaps_hulls <-
       
       
       write_tsv(UMAP_hulls$hulls, savefile_UMAP_polygons)
+      write_tsv(UMAP_hulls$center_density, savefile_cluster_center)
       saveRDS(UMAP_hulls, savefile_UMAP_hulls)
       
       UMAP_hulls$hulls
@@ -1315,6 +1317,12 @@ Sys.time() - t
 
 rm(cluster)
 
+# Load cluster centers
+all_cluster_centers <- 
+  file_structure %>% 
+  map(function(x)x$UMAP) %>% 
+  lapply(function(filename_) read_tsv(paste(filename_, "cluster_centers.tsv", sep = "/"))) %>% 
+  bind_rows(.id = "dataset_id")
 
 # Visualize cluster polygons
 graph_umaps_hulls %>% 
@@ -1322,11 +1330,68 @@ graph_umaps_hulls %>%
   geom_polygon(show.legend = F,
                color = "black") +
   theme_bw() +
+  geom_point(data = all_cluster_centers, aes(x, y), inherit.aes = F, size = 1) +
   facet_grid(~dataset_id) +
   coord_fixed()
 
 ggsave(run_id_savename("UMAP scaled hulls.pdf"),
        width = 8, height = 5)
 
+
+# Visualize for 1 dataset
+# UMAP_hulls <- 
+#   g_data %$%
+#   generate_cluster_hulls(V1 = UMAP_1_scaled,
+#                          V2 = UMAP_2_scaled, 
+#                          element_id = gene,
+#                          cluster_membership = cluster, 
+#                          n = 1000,
+#                          poly_concavity = 2,
+#                          poly_smoothing = 1.25,
+#                          relative_bandwidth = 1/150)
+# 
+# 
+# write_tsv(UMAP_hulls$hulls, savefile_UMAP_polygons)
+# saveRDS(UMAP_hulls, savefile_UMAP_hulls)
+# 
+# graph_umaps %>% 
+#   left_join(final_clusterings ) %>% 
+#   filter(dataset_id == "blood") %>% 
+#   ggplot(aes(UMAP_1_scaled, UMAP_2_scaled, color = as.factor(cluster))) +
+#   geom_point() +
+#   coord_fixed() +
+#   theme_void() +
+#   geom_point(data = UMAP_hulls$center_density, aes(x,y), inherit.aes = F) 
+
+
+# Run different parameters
+# hull_settings <- 
+#   expand_grid(dataset_id = unique(umap_plot_data$dataset_id),
+#               relative_bandwidth_i = c(150),
+#               poly_concavity = c(2),
+#               poly_smoothing = c(1.25),
+#               n = 1000) %>% 
+#   mutate(relative_bandwidth = 1 / relative_bandwidth_i,
+#          i = row_number())
+# 
+# 
+# hull_data <- 
+#   pblapply(hull_settings$i,
+#          function(i) {
+#            
+#            plot_data <- 
+#              umap_plot_data %>% 
+#              filter(dataset_id == hull_settings$dataset_id[i])
+#            
+#            generate_cluster_hulls(V1 = plot_data$UMAP_1_scaled,
+#                                   V2 = plot_data$UMAP_2_scaled, 
+#                                   element_id = plot_data$gene,
+#                                   cluster_membership = plot_data$cluster, 
+#                                   n = hull_settings$n[i],
+#                                   poly_concavity = hull_settings$poly_concavity[i],
+#                                   poly_smoothing = hull_settings$poly_smoothing[i],
+#                                   relative_bandwidth = hull_settings$relative_bandwidth[i]) 
+#            
+#          })
 ```
 
