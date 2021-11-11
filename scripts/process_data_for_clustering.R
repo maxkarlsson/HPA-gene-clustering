@@ -27,6 +27,7 @@ processing_functions <-
          spread(sample, ntpm),
        blood_consensus = . %>%
          select(ensg_id, sample = celltype, ntpm) %>%
+         filter(sample != "total PBMC") %>% 
          spread(sample, ntpm),
        brain_tissue = . %>% 
          select(ensg_id, sample = tissue, ntpm = tmm) %>% 
