@@ -473,7 +473,7 @@ calculate_tau_score <-
     max_exp <- 
       apply(wide_data,
             MARGIN = 1,
-            max)
+            function(x) max(x, na.rm = T))
     
     N <- 
       apply(wide_data,
@@ -487,7 +487,7 @@ calculate_tau_score <-
             FUN = `/`) %>% 
       {1 - .} %>% 
       apply(MARGIN = 1,
-            sum)
+            function(x) sum(x, na.rm = T))
     
     
     tau_score <- 
