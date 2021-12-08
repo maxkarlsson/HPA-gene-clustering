@@ -447,7 +447,7 @@ complete_palette <-
 
 
 complete_palette_neighbor <- 
-  function(pal_terms, pal) {
+  function(pal_terms, pal, force_colors = "") {
     
     pal_terms %>% 
       enframe("i", "name") %>% 
@@ -464,6 +464,8 @@ complete_palette_neighbor <-
       slice(1) %>% 
       ungroup() %>% 
       select(name, color) %>% 
+      mutate(color = case_when(name %in% names(force_colors) ~ force_colors[match(name, names(force_colors))],
+                               T ~ color)) %>% 
       deframe()
     
   }
