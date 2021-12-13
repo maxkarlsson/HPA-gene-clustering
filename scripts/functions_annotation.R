@@ -412,3 +412,35 @@ get_specificity_db <-
     
     out_db
   }
+
+
+perform_ORA <-
+  function(gene_associations,
+           database,
+           universe,
+           n_clusters = 5) {
+    require(clusterProfiler)
+    require(multidplyr)
+    worker_cluster <- new_cluster(n = n_clusters)
+    cluster_library(worker_cluster, c("dplyr",
+                                      "tidyverse"))
+    cluster_copy(worker_cluster, c("enricher",
+                                   "universe",
+                                   "database"))
+    outdata <-
+      gene_associations %>%
+      group_by(partition) %>%
+      partition(worker_cluster) %>%
+      do({
+        g_data <- .
+        pull(g_data, gene) %>%
+          enricher(maxGSSize = Inf,
+                   universe = universe,
+                   TERM2GENE = database) %>%
+          as_tibble()
+      }) %>%
+      ungroup() %>%
+      collect()
+    rm(worker_cluster)
+    outdata
+  }
