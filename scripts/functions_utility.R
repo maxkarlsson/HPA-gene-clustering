@@ -498,3 +498,64 @@ calculate_tau_score <-
     
     tau_score
   }
+
+
+
+ramp_color_bias <-
+  function(color1, color2, biases) {
+    require(tidyverse)
+    colors_rgb <-
+      colorRamp(c(color1, color2))(biases)
+    rgb(colors_rgb[,1],
+        colors_rgb[,2],
+        colors_rgb[,3],
+        maxColorValue = 255)
+  }
+
+
+cluster_long_data <-  
+  function(long_data,
+           distance_method = "euclidean",
+           clustering_method = "ward.D2", 
+           cluster_rows = T,
+           cluster_cols = T) {
+    suppressMessages(require(tidyverse))
+    
+    wide_data <- 
+      long_data %>% 
+      select(1:3) %>% 
+      spread(2, 3) %>% 
+      column_to_rownames(names(long_data)[1])
+    
+    order_row <- 
+      rownames(wide_data)
+    order_col <- 
+      colnames(wide_data)
+    
+    
+    if(cluster_rows) {
+      order1 <- 
+        wide_data %>% 
+        dist(method = distance_method) %>% 
+        hclust(method = clustering_method) %>% 
+        with(labels[order])
+    }
+    
+    if(cluster_cols) {
+      order2 <- 
+        wide_data %>% 
+        t() %>% 
+        dist(method = distance_method) %>% 
+        hclust(method = clustering_method) %>% 
+        with(labels[order])
+    }
+    
+    long_data %>% 
+      rename(v1 = 1, 
+             v2 = 2,
+             val = 3) %>% 
+      mutate(v1 = factor(v1, order1),
+             v2 = factor(v2, order2)) %>% 
+      set_names(names(long_data))
+    
+  }
