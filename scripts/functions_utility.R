@@ -518,13 +518,14 @@ cluster_long_data <-
            distance_method = "euclidean",
            clustering_method = "ward.D2", 
            cluster_rows = T,
-           cluster_cols = T) {
+           cluster_cols = T, 
+           fill = NA) {
     suppressMessages(require(tidyverse))
     
     wide_data <- 
       long_data %>% 
       select(1:3) %>% 
-      spread(2, 3) %>% 
+      spread(2, 3, fill = fill) %>% 
       column_to_rownames(names(long_data)[1])
     
     order_row <- 

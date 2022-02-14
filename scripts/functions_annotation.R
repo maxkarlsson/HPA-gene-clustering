@@ -418,29 +418,52 @@ perform_ORA <-
   function(gene_associations,
            database,
            universe,
-           n_clusters = 5) {
+           n_clusters = 5,
+           minGSSize = 10,
+           maxGSSize = Inf,
+           pvalueCutoff = 0.05,
+           qvalueCutoff = 0.2) {
     require(clusterProfiler)
     require(multidplyr)
-    worker_cluster <- new_cluster(n = n_clusters)
-    cluster_library(worker_cluster, c("dplyr",
-                                      "tidyverse"))
-    cluster_copy(worker_cluster, c("enricher",
-                                   "universe",
-                                   "database"))
+    
+    if(n_clusters != 1) {
+      worker_cluster <- new_cluster(n = n_clusters)
+      cluster_library(worker_cluster, c("dplyr",
+                                        "tidyverse"))
+      cluster_copy(worker_cluster, c("enricher",
+                                     "universe",
+                                     "database",
+                                     "minGSSize",
+                                     "maxGSSize",
+                                     "pvalueCutoff",
+                                     "qvalueCutoff" ))
+      
+      pre_out <- 
+        gene_associations %>%
+        group_by(partition) %>%
+        partition(worker_cluster) 
+    } else {
+      pre_out <- 
+        gene_associations %>%
+        group_by(partition)
+    }
+    
     outdata <-
-      gene_associations %>%
-      group_by(partition) %>%
-      partition(worker_cluster) %>%
+      pre_out %>% 
       do({
         g_data <- .
         pull(g_data, gene) %>%
-          enricher(maxGSSize = Inf,
-                   universe = universe,
-                   TERM2GENE = database) %>%
+          enricher(universe = universe,
+                   TERM2GENE = database, 
+                   minGSSize = minGSSize,
+                   maxGSSize = maxGSSize,
+                   pvalueCutoff = pvalueCutoff,
+                   qvalueCutoff = qvalueCutoff) %>%
           as_tibble()
       }) %>%
       ungroup() %>%
       collect()
-    rm(worker_cluster)
+    
+    if(n_clusters != 1) rm(worker_cluster)
     outdata
   }

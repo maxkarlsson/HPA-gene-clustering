@@ -22,17 +22,20 @@ library(multidplyr)
 library(clusterProfiler)
 
 library(tidygraph)
+library(igraph)
 library(ggraph)
 library(ggrepel)
 library(ggthemes)
 library(ggrastr)
 library(ggforce)
 library(ggupset)
+library(geomtextpath)
 library(plotly)
 library(patchwork)
 library(ggalluvial)
 library(uwot)
 library(aricode)
+library(treemapify)
 
 source("scripts/functions_utility.R")
 source("scripts/functions_annotation.R")
@@ -64,6 +67,8 @@ file_structure <-
                                       "UMAP" = "UMAP",
                                       "treemap" = "svg/treemap",
                                       "heatmap" = "svg/heatmap",
+                                      "distance" = "distance",
+                                      "graph" = "graph",
                                       "enrichment" = "enrichment",
                                       "clustering" = "clustering"))
 ```
@@ -423,6 +428,13 @@ protein_loc_palette <- c("membrane" = "#6DB9C6",
 
 protein_loc_palette %>% 
   prismatic::color()
+
+
+cor_heatmap_palette <- 
+  c("white",
+    viridis::inferno(8,
+                     dir = -1)) %>%
+  colorRampPalette()
 ```
 
 ### Info
@@ -440,6 +452,16 @@ gene_names <-
 membr_secr_genes <- 
   read_tsv("data/meta/mem_sec_20090.txt")
 
+tissue_sample_metadata <- 
+  read_tsv("data/meta/tissue_sample_metadata.tsv")
+
+norm_metadata <- read_tsv("../../Data/HPA/HPA21_E103_files/meta_data.tsv")
+
+IHC_data <- 
+  read_tsv("data/meta/IHC_normal_tissue.tsv")
+
+tf_data <- 
+  read_tsv("data/meta/transcription_factors.txt")
 ```
 
 
@@ -451,16 +473,664 @@ membr_secr_genes <-
 raw_data %>% 
   map(. %>% 
         select(-1) %>% 
-        ncol) %>% 
+        ncol()) %>% 
   unlist() %>% 
   enframe()
 ```
+
+## Meta data
+
+```{r}
+
+
+```
+
+## Colors 
+
+```{r}
+
+region_colors %>%
+  group_by(dataset_id, color) %>% 
+  summarise(samples = paste(sample, collapse = ",") %>% 
+              substr(1,20)) %>% 
+  ggplot(aes(1, samples, color = color)) +
+  geom_point(size = 3.5) +
+  facet_grid(dataset_id ~ ., space = "free", scales = "free") +
+  scale_color_identity() +
+  theme_void() +
+  theme(axis.text.y = element_text(hjust = 1))
+ggsave(savepath("Color legend draft.pdf"),
+       width = 3.5, height = 8)
+
+
+```
+
 
 ## Clustering
 
 ```{r}
 
+
+# plots <- 
+#   clustering_data$dataset_id %>% 
+#   unique() %>% 
+#   lapply(function(ds_) {
+#     
+#     
+#   })
+
+
+plot_data <- 
+  clustering_data %>%
+  # filter(cluster %in% 1:3) %>% 
+  arrange(as.numeric(cluster)) %>% 
+  mutate(cluster = factor(cluster, unique(cluster))) %>% 
+  
+  left_join(consensus_data %>% 
+              map(. %>% 
+                    gather(sample, ntpm, -1)) %>% 
+              bind_rows(.id = "dataset_id"),
+            by = c("gene" = "ensg_id", 
+                   "dataset_id")) %>% 
+  group_by(dataset_id, gene) %>% 
+  mutate(ntpm = ntpm / max(ntpm)) %>% 
+  ungroup() %>% 
+  mutate(sample = factor(sample, consensus_clust_labelorder$cor_average %>% 
+                           unlist())) 
+
+plot <- 
+  plot_data %>% 
+  ggplot(aes(sample, ntpm, fill = sample))+
+  geom_boxplot(outlier.colour = NA,
+               show.legend = F) +
+  facet_grid(cluster ~ dataset_id,
+             scales = "free_x",
+             space = "free") +
+  scale_fill_manual(values = consensus_palette) + 
+  scale_y_continuous(limits = 0:1, 
+                     breaks = 0:1) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) 
+
+ggsave(savepath("Cluster expression pattern all.pdf"),
+       plot = plot,
+       width = 27, height = 49)
+
+
+
+plot_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster %in% c(49, 25, 50, 52, 37, 30, 14, 54, 43)) %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, cluster, ann_specificity, ann_function)) %>% 
+  mutate(annotation = paste(cluster, ann_specificity, ann_function, 
+                            sep = "\n")) %>% 
+  ggplot(aes(sample, ntpm, fill = sample))+
+  geom_boxplot(outlier.colour = NA,
+               show.legend = F) +
+  facet_grid(annotation ~ dataset_id,
+             scales = "free_x",
+             space = "free") +
+  scale_fill_manual(values = consensus_palette) + 
+  scale_y_continuous(limits = 0:1, 
+                     breaks = 0:1) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        strip.text.y = element_text(angle = 0)) 
+ggsave(savepath("Cluster expression pattern examples1.pdf"),
+       width = 11, height = 12)
+
+
+GO_BP %>% 
+  filter(term == "sperm axoneme assembly") %>% 
+  left_join(clustering_data,
+            by = c("ensg_id" = "gene")) %>% 
+  group_by(dataset_id, cluster) %>% 
+  count() %>% 
+  arrange(-n)
+
+
+clustering_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == 23) %>% 
+  left_join(gene_info %>% 
+              select(gene = 2, 3)) %>% 
+  pull(gene_name) %>% sort
+  
+enrichment_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == 23) %>% 
+  filter(!grepl("GO|react|KEGG", test_type)) 
+
+
+a <- read_tsv("data/meta/test.txt")
+
+a %>% View
+
+
+enrichment_settings %>% 
+    filter(id == "GO_BP_original") %>% 
+    pull(file) %>% 
+    paste0("annotation_databases/", .) %>% 
+    read_tsv()->b
+  # filter(grepl("axoneme", `GO term name`)) 
+  filter(`GO term name` == "axoneme",
+         `GO domain` == "cellular_component") %>% 
+  select(gene = 1) %>% 
+  left_join(clustering_data) %>% 
+  group_by(dataset_id, cluster) %>% 
+  count() %>% 
+  arrange(dataset_id, -n) %>% 
+  filter(dataset_id == "singlecell") %>% pull(n) 
+
+
+clustering_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == 49) 
+
+enrichment_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == 49)%>% 
+  arrange(p.adjust) %>% 
+  filter(!grepl("GO", test_type)) %>% 
+  View
+
+enrichment_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == 43) %>% View  
+
+enrichment_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == 49)%>% 
+  arrange(p.adjust) %>% 
+  filter(!grepl("GO", test_type)) %>% 
+  group_by(test_type) %>% 
+  summarise(string = paste(Description, collapse = ", ")) %>% 
+  unite(string, test_type, string, sep = ": ") %>% 
+  pull(1)
+  
+clustering_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == 43) %>% 
+  left_join(consensus_data$tissue,
+            by = c("gene" = "ensg_id")) %>% 
+  select(-dataset_id, -cluster) %>% 
+  left_join(gene_info %>% 
+              select(gene = 2, 3)) %>% 
+  select(-gene) %>% 
+  column_to_rownames("gene_name") %>% 
+  # t() %>% 
+  scale_data(max_scale = T) %>%
+  t() %>% 
+  pheatmap(fontsize = 7, cellwidth = 6, cellheight = 6, 
+           border_color = NA,
+           clustering_method = "ward.D2",
+           color = cor_heatmap_palette(100),
+           annotation_col = clustering_data %>% 
+             filter(dataset_id == "singlecell",
+                    cluster == 43) %>% 
+             left_join(IHC_data,
+                       by = c("gene" = "Gene")) %>% 
+             filter(Tissue == "heart muscle") %>% 
+             select(`Gene name`, Level) %>% 
+             mutate(i = 1) %>% 
+             spread(Level, i, fill = 0) %>% 
+             column_to_rownames("Gene name"))
+
+
+
 ```
+
+### Deep characterization cluster 49
+
+```{r}
+
+example_cluster <- 49
+
+example_enrdata <- 
+  enrichment_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == example_cluster)
+
+example_clusdata <- 
+  clustering_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == example_cluster) %>% 
+  left_join(gene_info %>% 
+              select(gene = 2, 3))
+
+
+
+plot_data <- 
+  clustering_data %>%
+  filter(dataset_id == "singlecell", cluster == example_cluster) %>%
+  arrange(as.numeric(cluster)) %>% 
+  mutate(cluster = factor(cluster, unique(cluster))) %>% 
+  
+  left_join(consensus_data %>% 
+              map(. %>% 
+                    gather(sample, ntpm, -1)) %>% 
+              bind_rows(.id = "dataset_id"),
+            by = c("gene" = "ensg_id", 
+                   "dataset_id")) %>% 
+  group_by(dataset_id, gene) %>% 
+  mutate(ntpm = ntpm / max(ntpm)) %>% 
+  ungroup() %>% 
+  mutate(sample = factor(sample, consensus_clust_labelorder$cor_average %>% 
+                           unlist())) 
+
+plot <- 
+  plot_data %>% 
+  ggplot(aes(sample, ntpm, fill = sample))+
+  geom_boxplot(outlier.colour = NA,
+               show.legend = F) +
+  facet_grid(cluster ~ dataset_id,
+             scales = "free_x",
+             space = "free") +
+  scale_fill_manual(values = consensus_palette) + 
+  scale_y_continuous(limits = 0:1, 
+                     breaks = 0:1) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) 
+
+ggsave(savepath("Cluster expression pattern all.pdf"),
+       plot = plot,
+       width = 27, height = 49)
+
+#######################
+example_noncil_genes <- 
+  example_clusdata %>% 
+  left_join(database_terms %>% 
+              filter(!str_detect(id, "^specificity")) %>%
+              filter(id != "panglao_cellmarkers") %>% 
+              inner_join(example_enrdata %>% 
+                           select(id = test_type, 
+                                  term_id = ID) %>% 
+                           distinct()),
+            by = c("gene" = "ensg_id")) %>% 
+  group_by(gene, gene_name) %>% 
+  summarise(terms = paste(sort(term), collapse = ", ")) %>% 
+  ungroup() %>% 
+  mutate(cilium = str_detect(terms, "cilium|cilia|ciliated|ciliary|microtubule|cytoskeleton|axonem|Cilium|centriole|dynein")) %>% 
+  filter(!cilium)
+
+example_noncil_genes %>% 
+  separate_rows(terms, sep = ", ") %>% 
+  group_by(terms) %>% 
+  count %>% 
+  arrange(-n)
+
+example_noncil_genes_IHC <- 
+  example_noncil_genes %>% 
+  left_join(IHC_data %>% 
+              select(-2),
+            by = c("gene" = "Gene")) %T>% 
+  {pull(., Level) %>% table() %>% print()} %T>%
+  {pull(., Reliability) %>% table() %>% print()} %>%
+  filter(Level %in% c("Medium", "High"),
+         Reliability %in% c("Approbed", "Enhanced", "Supported")) %>% 
+  # mutate(detected = 1) %>% 
+  filter(str_detect(`Cell type`, "cilia")) %>% 
+  distinct() %>% 
+  arrange(gene_name)
+
+n_distinct(example_noncil_genes_IHC$gene_name)
+
+# example_noncil_genes_IHC %>% 
+#   filter(str_detect(gene_name, "orf")) %>% View
+
+example_noncil_genes_IHC %>% 
+  pull(gene_name) %>%
+  unique() %>% 
+  sort() %>% 
+  paste(collapse = "\n") %>% 
+  cat
+
+filter(ensg_id %in% example_clusdata$gene)
+
+
+
+
+####################################################
+plot_data <- 
+  example_clusdata %>% 
+  left_join(IHC_data,
+            by = c("gene" = "Gene")) %>% 
+  filter(Level != "Not representative" |
+           is.na(Level)) %>% 
+  group_by(gene, gene_name, 
+           tissue = Tissue, 
+           cell_type = `Cell type`) %>% 
+  # pull(Level) %>% unique
+  summarise(detected = Level != "Not detected",
+            det_level = case_when(Level == "High" ~ 1,
+                                  Level == "Medium" ~ 0.5,
+                                  Level == "Low" ~ 0.2,
+                                  Level == "Descending" ~ 0.5,
+                                  Level == "Ascending" ~ 0.5,
+                                  T ~ 0) %>% 
+              max()) %>% 
+  ungroup()
+            
+plot_data %>% 
+  filter(!is.na(tissue)) %>% 
+  filter(tissue != "N/A") %>% 
+  # filter(!complete.cases(.))
+  unite(A, tissue, cell_type) %>% 
+  select(gene_name, A, det_level, everything()) %>% 
+  # filter(!complete.cases(.))
+  cluster_long_data(fill = 0) %>% 
+  # filter(A == "NA_NA")
+  ggplot(aes(gene_name, A, alpha = det_level)) +
+  geom_tile(fill = "orangered") + 
+  scale_alpha_continuous(breaks = c(1, 0.5, 0.25, 0), 
+                         limits = 0:1,
+                         range = 0:1, 
+                         labels = c("High", "Medium", "Low", "No data")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, 
+                                   hjust = 1,
+                                   vjust = 0.5,
+                                   size = 6),
+        axis.text.y = element_text(size = 6)) +
+  coord_fixed()
+ggsave(savepath("IHC heatmap 1.pdf"),
+       width = 22, height = 15)
+
+plot_data %>% 
+  filter(!is.na(tissue)) %>% 
+  filter(tissue != "N/A") %>% 
+  group_by(gene, gene_name, cell_type) %>% 
+  top_n(1, det_level) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  select(gene_name, cell_type, det_level, everything(), -tissue) %>% 
+  
+  cluster_long_data(fill = 0) %>% 
+  # filter(A == "NA_NA")
+  ggplot(aes(gene_name, cell_type, alpha = det_level)) +
+  geom_tile(fill = "orangered") + 
+  scale_alpha_continuous(breaks = c(1, 0.5, 0.25, 0), 
+                         limits = 0:1,
+                         range = 0:1, 
+                         labels = c("High", "Medium", "Low", "No data")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, 
+                                   hjust = 1,
+                                   vjust = 0.5,
+                                   size = 6),
+        axis.text.y = element_text(size = 6)) +
+  coord_fixed()
+ggsave(savepath("IHC heatmap 2.pdf"),
+       width = 22, height = 10)
+
+# plot_data <-
+#   raw_data$tissue_consensus %>% 
+#   gather(tissue, ntpm, -1) %>% 
+#   left_join(IHC_data %>% 
+#               mutate(Tissue = str_remove(Tissue, " \\d$")),
+#             by = c("ensg_id" = "Gene",
+#                    "tissue" = "Tissue")) %>% 
+#   # filter(!is.na(Level))
+#   mutate(detected_tis = ntpm > 1,
+#          detected_ihc = Level != "Not detected")
+# 
+# plot_data2 <- 
+#   plot_data %>% 
+#   group_by(ensg_id, tissue) %>% 
+#   summarise(detected_tis = any(detected_tis),
+#             detected_ihc = any(detected_ihc)) %>% 
+#   group_by(tissue, detected_tis, detected_ihc) %>% 
+#   count() %>% 
+#   ungroup()
+# 
+# 
+# plot_data2 %>% 
+#   filter(complete.cases(.)) %>% 
+#   group_by(tissue) %>% 
+#   mutate(frac = n / sum(n)) %>% 
+#   ungroup() %>% 
+#   ggplot(aes(detected_tis, detected_ihc, alpha = frac, label = n)) +
+#   geom_tile(fill = "orangered") + 
+#   geom_text() +
+#   facet_wrap(~tissue) +
+#   theme_bw() +
+#   scale_alpha_continuous(range = c(0, 1), limits = c(0, 1)) +
+#   coord_fixed()
+# 
+# 
+# IHC_data %>% 
+#   select(Tissue, Gene) %>% 
+#   distinct() %>% 
+#   group_by(Tissue) %>% 
+#   count() %>% 
+#   arrange(n) %>% View
+# 
+# IHC_data %>% 
+#   filter(Tissue == "skin")
+#   filter()
+
+```
+
+### Deep characterization cluster 30
+
+```{r}
+
+IHC_data %>% 
+  select(Gene, Tissue) %>% 
+  distinct() %>% 
+  group_by(Tissue) %>% 
+  count %>% 
+  ggplot(aes(n, Tissue)) +
+  geom_col()
+
+
+
+example_cluster <- 30
+
+example_enrdata <- 
+  enrichment_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == example_cluster)
+
+example_clusdata <- 
+  clustering_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == example_cluster) %>% 
+  left_join(gene_info %>% 
+              select(gene = 2, 3))
+
+example_clusdata
+example_enrdata
+
+example_nonlac_genes <- 
+  example_clusdata %>% 
+  left_join(database_terms %>% 
+              filter(!str_detect(id, "^specificity")) %>%
+              # filter(id != "panglao_cellmarkers") %>% 
+              inner_join(example_enrdata %>% 
+                           select(id = test_type, 
+                                  term_id = ID) %>% 
+                           distinct()),
+            by = c("gene" = "ensg_id")) %>% 
+  group_by(gene, gene_name) %>% 
+  summarise(terms = paste(sort(term), collapse = ", ")) %>% 
+  ungroup() %>% 
+  mutate(lact = str_detect(terms, 
+                           "lactation|lipid|Mammary|female|Breast|gland")) %>% 
+  filter(!lact)
+
+example_nonlac_genes2 <- 
+  example_nonlac_genes %>% 
+  select(1, gene_name) %>% 
+  left_join(gene_info %>% 
+              select(3, gene_description)) %>% 
+  filter(!str_detect(gene_description, "lacto")) 
+
+example_nonlac_genes2 %>% 
+  print(n = 100)
+
+example_nonlac_genes2_breastIHC <- 
+  example_nonlac_genes2 %>% 
+  left_join(IHC_data %>% 
+              select(-2),
+            by = c("gene" = "Gene")) %T>% 
+  {pull(., 5) %>% unique() %>% sort %>% print} %>% 
+  filter(Tissue == "breast")
+
+plot_filt <- 
+  example_nonlac_genes2_breastIHC %>% 
+  filter(Level != "Not detected") 
+
+
+plot_filt %>% 
+  select(gene, gene_name) %>% 
+  distinct() %>% 
+  left_join(raw_data$singlecell_consensus,
+            by = c("gene" = "ensg_id")) %>% 
+  select(-gene) %>% 
+  column_to_rownames("gene_name") %>% 
+  scale_data(max_scale = T) %>% 
+  pheatmap(clustering_method = "ward.D2",
+           color = cor_heatmap_palette(100))
+
+C("SSH3", "AKT1", "CES4A", "ACTR3B", "MTA1", "BICDL2")
+
+gene_info %>% 
+  filter(str_detect(gene_name, "^BICD|HOOK|^NIN" )) %>% 
+  select(2, 3) %>% 
+  left_join(clustering_data,
+            by = c("ensg_id" = "gene")) %>% 
+  arrange(dataset_id, gene_name) %>% 
+  left_join(cluster_annotation %>% 
+              select(1, 2, matches("^ann_"))) %>% 
+  print(n = 50)
+
+gene_info %>% 
+  filter(str_detect(gene_name, "^CES" )) %>% 
+  select(2, 3) %>% 
+  left_join(clustering_data,
+            by = c("ensg_id" = "gene")) %>% 
+  arrange(dataset_id, gene_name) %>% 
+  left_join(cluster_annotation %>% 
+              select(1, 2, matches("^ann_"))) %>% 
+  print(n = 50)
+
+IHC_data %>% 
+  filter(`Gene name` == "SPINK8")
+```
+
+### Deep characterization of cluster 28 and
+
+```{r}
+example_cluster <- 28
+
+example_enrdata <- 
+  enrichment_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == example_cluster)
+
+example_clusdata <- 
+  clustering_data %>% 
+  filter(dataset_id == "singlecell",
+         cluster == example_cluster) %>% 
+  left_join(gene_info %>% 
+              select(gene = 2, 3))
+
+example_enrdata %>% 
+  select(2, Description) %>% 
+  print(n = 50)
+
+example_nonskin_genes <- 
+  example_clusdata %>% 
+  left_join(database_terms %>% 
+              filter(!str_detect(id, "^specificity")) %>%
+              # filter(id != "panglao_cellmarkers") %>% 
+              inner_join(example_enrdata %>% 
+                           select(id = test_type, 
+                                  term_id = ID) %>% 
+                           distinct()),
+            by = c("gene" = "ensg_id")) %>% 
+  group_by(gene, gene_name) %>% 
+  summarise(terms = paste(sort(term), collapse = ", ")) %>% 
+  ungroup() %>% 
+  mutate(lact = str_detect(terms, 
+                           "cornification|keratinization|epidermis|skin|keratin|corni|Epith|Keratin|extracell")) %>% 
+  filter(!lact)
+
+
+  
+example_nonskin_genes2 <- 
+  example_nonskin_genes %>% 
+  select(1, gene_name) %>% 
+  left_join(gene_info %>% 
+              select(3, gene_description))  
+
+
+example_nonskin_genes2 %>% 
+  print(n = 100)
+
+example_nonskin_genes2_skinIHC <- 
+  example_nonskin_genes2 %>% 
+  left_join(IHC_data %>% 
+              select(-2),
+            by = c("gene" = "Gene")) %T>% 
+  {pull(., 5) %>% unique() %>% sort %>% print} %>% 
+  filter(str_detect(Tissue, "skin")) %>% 
+  filter(Level %in% c("Medium", "High")) %>% 
+  left_join(gene_classification %>% 
+              select(ensg_id, dataset_id, enhanced_tissues) %>% 
+              spread(dataset_id, enhanced_tissues) %>% 
+              select(ensg_id, singlecell, tissue),
+            by = c("gene" = "ensg_id"))
+
+
+example_nonskin_genes2_skinIHC %>% 
+  print(n = 100)
+
+plot_data <- 
+  raw_data$singlecell_consensus %>% 
+  gather(sample, ntpm, -1)
+
+
+
+
+
+```
+
+
+### Transcription factors
+
+```{r}
+
+
+gene_info %>% 
+  filter(gene_name %in% c("FOS", 
+                          "JUN")) %>% 
+  select(2,3) %>% 
+  left_join(GO_BP) %>% 
+  View
+
+gene_info %>% 
+  filter(gene_name %in% c("FOS", 
+                          "JUN")) %>% 
+  select(gene = 2,3) %>% 
+  left_join(clustering_data) %>% 
+  left_join(cluster_annotation %>% 
+              select(1, 2, ann_specificity, ann_function)) %>% 
+  arrange(dataset_id)
+
+
+clustering_data %>% 
+  filter(dataset_id %in% c("singlecell", "tissue")) %>% 
+  left_join(cluster_annotation %>% 
+              select(1, 2, 5, 6)) %>% 
+  mutate(is_tf = gene %in% tf_data$ensg_id) %>% 
+  write_csv(savepath("tf_cluster_data.csv"))
+
+
+```
+
 
 ## Hierarchical clustering
 
@@ -769,7 +1439,6 @@ clustering_data %>%
   labs(x = "Number of datasets gene is in low specificity clustering") +
   theme_bw()
 
-plot_data
 
 ```
 
@@ -946,6 +1615,37 @@ plots <-
 
 
 
+
+
+database_terms <- 
+  enrichment_settings %>% 
+  filter(!is.na(file)) %>% 
+  group_by(id) %>% 
+  do({
+    g_data <<- .
+    
+    out_db <- 
+      get_db(enrichment_settings, g_data$id)
+      
+    if(g_data$gene_format != "ensembl") {
+      gene_format_function <- gene_formatting_functions[[g_data$gene_format]]
+      
+      out_db <- 
+        out_db %>%
+        gene_format_function()
+      
+    }
+    
+    stopifnot(all(names(out_db) == c("ensg_id", "term", "term_id")))
+    
+    out_db
+    
+  }) %>% 
+  ungroup()
+
+
+
+
 ```
 
 ## Expression beeswarm
@@ -1044,39 +1744,527 @@ ggsave(savepath("Singlecell max elevated exp bee.pdf"),
 #                                    vjust = 0.5))
 # ggsave(savepath("Singlecell max exp bee.pdf"),
 #        width = 10, height = 6)
+
+```
+
+## Specificity class
+
+```{r}
+
+gene_classification_long %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(!is.na(enhanced_tissues)) %>% 
+  left_join(gene_consensus_tau,
+            by = c("dataset_id", "ensg_id" = "gene")) %>% 
+  
+  filter(tau_score > 0.99) %>% 
+  mutate(enhanced_tissues = factor(enhanced_tissues, 
+                                   unlist(consensus_clust_labelorder$cor_average))) %>% 
+  ggplot(aes(tau_score,
+             enhanced_tissues)) +
+  geom_point()
+
+plot_data <- 
+  consensus_data %>% 
+  map(. %>% gather(sample, ntpm, -1)) %>%
+  bind_rows(.id = "dataset_id") %>% 
+  inner_join(gene_consensus_tau,
+             by = c("dataset_id", "ensg_id" = "gene")) %>% 
+  group_by(ensg_id) %>% 
+  mutate(ntpm_scaled = ntpm / max(ntpm, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(sample = factor(sample, 
+                         unlist(consensus_clust_labelorder$cor_average))) %>% 
+  left_join(gene_info %>% 
+              select(2, 3))
+
+plot_data %>% 
+  filter(dataset_id == "singlecell") %>%
+  ggplot(aes(log10(ntpm + 1), sample)) +
+  geom_violin() + 
+  geom_text(data = . %>% 
+              filter(ntpm_scaled > 0.99,
+                     tau_score > 0.99) %>%  
+              group_by(sample) %>% 
+              top_n(3, ntpm),
+            aes(label = gene_name))
+
+
+
+# plot_data %>% filter(log10(ntpm + 1)>4,
+#                      sample == "liver") %>% 
+#   left_join(gene_info %>% 
+#               select(2, 3)) %>% 
+#   arrange(tau_score) %>% 
+#   View
+
+plot_data %>% 
+  filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(tau_score, ntpm_scaled)) +
+  geom_hex(bins = 50) +
+  facet_wrap(~sample) 
+
+
+plot_data %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(tau_score, log10(ntpm + 1))) +
+  geom_hex(bins = 50) +
+  facet_wrap(~sample) 
+
+#################################################
+
+gene_class_GO_ORA_file <- 
+  "data/processed/gene classification GO ORA.rds"
+
+if(file.exists(gene_class_GO_ORA_file)) {
+  gene_class_GO_res <- 
+    readRDS(gene_class_GO_ORA_file)
+  
+} else {
+  GO_BP <-
+    enrichment_settings %>% 
+    filter(id == "GO_BP_original") %>% 
+    pull(file) %>% 
+    paste0("annotation_databases/", .) %>% 
+    read_tsv() %>% 
+    filter(`GO domain` == "biological_process") %>% 
+    GO_formatting_function()
+  
+  gene_enrich_GO_ORA <- 
+    gene_classification_long %>% 
+    filter(specificity_category %in% 
+             c("Tissue enriched",
+               "Group enriched")) %>% 
+    # filter(enhanced_tissues == "Hepatocytes") %>% 
+    select(dataset_id, 
+           partition = enhanced_tissues, 
+           gene = ensg_id) %>% 
+    group_by(dataset_id, partition) %>% 
+    do({
+      
+      g_data <<- .
+      
+      perform_ORA(g_data, 
+                  GO_BP %>% 
+                    select(term_id, gene = ensg_id),
+                  universe = unique(gene_classification$ensg_id),
+                  n_clusters = 1,
+                  minGSSize = 2,
+                  maxGSSize = Inf,
+                  pvalueCutoff = 0.05,
+                  qvalueCutoff = 0.05)
+    }) %>% 
+    ungroup() %>% 
+    left_join(GO_BP %>% 
+                select(ID = term_id, term) %>% 
+                distinct()) %>% 
+    mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
+             as.numeric(gsub(".*\\/", "", GeneRatio)),
+           BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
+             as.numeric(gsub(".*\\/", "", BgRatio)),
+           odds_ratio = GeneFrac / BgFrac)   %>% 
+    select(-Description) %>% 
+    select(1:3, Description = term, everything())
+  
+  gene_enrich_GO_ORA_simmat <-
+    gene_enrich_GO_ORA %>% 
+    pull(ID) %>% 
+    unique() %>% 
+    
+    rrvgo::calculateSimMatrix(orgdb = "org.Hs.eg.db",
+                              keytype = "ENSEMBL",
+                              ont = "BP",
+                              method = "Wang")
+  
+  
+  
+  ###
+  
+  worker_cluster <- new_cluster(n = 6)
+  cluster_library(worker_cluster, c("dplyr",
+                                    "tidyverse",
+                                    "rrvgo"))
+  cluster_copy(worker_cluster, c("gene_enrich_GO_ORA_simmat"))
+  
+  gene_enrich_GO_ORA_simp <- 
+    gene_enrich_GO_ORA %>%
+    group_by(dataset_id, partition) %>% 
+    filter(n_distinct(ID) >= 2) %>% 
+    partition(worker_cluster) %>% 
+    do({
+      g_data <- .
+      
+      g_terms <- 
+        g_data$ID[which(g_data$ID %in%
+                          colnames(gene_enrich_GO_ORA_simmat))]
+      
+      sim_mat <- 
+        gene_enrich_GO_ORA_simmat[g_terms,
+                                  g_terms]
+      
+      sim_mat %>%
+        reduceSimMatrix(setNames(g_data$odds_ratio, g_data$ID),
+                        threshold=0.7,
+                        orgdb="org.Hs.eg.db") %>%
+        as_tibble() %>% 
+        rename(term_cluster = cluster)
+      
+      
+    }) %>% 
+    ungroup() %>% 
+    collect()
+  
+  rm(worker_cluster)
+  
+  ####
+  
+  gene_class_GO_res <- 
+    list(GO_BP = GO_BP,
+         ORA = gene_enrich_GO_ORA,
+         simmat = gene_enrich_GO_ORA_simmat,
+         simp_ORA = gene_enrich_GO_ORA_simp)
+  
+  saveRDS(gene_class_GO_res,
+          gene_class_GO_ORA_file)
+  
+}
+
+gene_enrich_GO_ORA2 <- 
+  gene_enrich_GO_ORA %>% 
+  select(1:6, odds_ratio, everything()) %>% 
+  select(-BgFrac, -GeneFrac, -Count) %>% 
+  left_join(select(., dataset_id, partition, ID, geneID) %>% 
+              distinct() %>% 
+              separate_rows(geneID, sep = "/") %>% 
+              left_join(gene_info %>% 
+                          select(2,3),
+                        by = c("geneID" = "ensg_id")) %>% 
+              group_by(dataset_id, partition, ID) %>% 
+              summarise(gene_name = paste(sort(gene_name), collapse = "/"))) 
+
+gene_enrich_GO_ORA2 %>% 
+  write_csv(savepath("classification_GO_ORA.csv"))
+
+######### Hepatocytes 
+
+gene_enrich_GO_ORA2 %>% 
+  select( -pvalue, -qvalue) %>% 
+  filter(partition == "Hepatocytes") 
+
+temp_data <- 
+  gene_classification_long %>% 
+  filter(specificity_category == "Tissue enriched",
+         enhanced_tissues == "Hepatocytes") %>% 
+  select(ensg_id) %>% 
+  left_join(gene_info %>% 
+              select(2, 3)) %>% 
+  inner_join(GO_BP) %>% 
+  group_by(term_id) %>% 
+  filter(n_distinct(ensg_id) > 5) %>% 
+  ungroup() %>% 
+  arrange(term) 
+  
+temp_data %>% 
+  filter(grepl("complement activation", term)) %>% 
+  # pull(3) %>% 
+  pull(gene_name) %>% 
+  unique() %>% 
+  sort() %>% 
+  paste(collapse = ", ")
+
+temp_data %>% 
+  filter(grepl("drug metabo", term)) %>% 
+  # pull(3) %>% 
+  pull(gene_name) %>% 
+  unique() %>% 
+  sort() %>% 
+  paste(collapse = ", ")
+
+temp_data %>% 
+  filter(grepl("hemostasis", term)) %>% 
+  # pull(3) %>% 
+  pull(gene_name) %>% 
+  unique() %>% 
+  sort() %>% 
+  paste(collapse = ", ")
+
+#####  Cardiomyoytes
+
+
+gene_enrich_GO_ORA2 %>% 
+  select( -pvalue, -qvalue) %>% 
+  filter(partition == "Cardiomyocytes")
+
+temp_data <- 
+  gene_classification_long %>% 
+  filter(specificity_category == "Tissue enriched",
+         enhanced_tissues == "Cardiomyocytes") %>% 
+  select(ensg_id) %>% 
+  left_join(gene_info %>% 
+              select(2, 3)) %>% 
+  inner_join(GO_BP) %>% 
+  group_by(term_id) %>% 
+  filter(n_distinct(ensg_id) > 5) %>% 
+  ungroup() %>% 
+  arrange(term) 
+
+
+temp_data %>% 
+  filter(grepl("muscle", term)) %T>% 
+  {pull(., 3) %>% 
+      unique() %>% 
+      print()} %>%
+  pull(gene_name) %>% 
+  unique() %>% 
+  sort() %>% 
+  paste(collapse = ", ")
+
+#####  oligodendrocytes
+
+
+gene_enrich_GO_ORA2 %>% 
+  select( -pvalue, -qvalue) %>% 
+  filter(partition == "Oligodendrocytes") %>% 
+  select(Description, GeneRatio, p.adjust, odds_ratio, gene_name)
+
+temp_data <- 
+  gene_classification_long %>% 
+  filter(specificity_category == "Tissue enriched",
+         enhanced_tissues == "Oligodendrocytes") %>% 
+  select(ensg_id) %>% 
+  left_join(gene_info %>% 
+              select(2, 3, gene_description)) %>% 
+  inner_join(GO_BP) %>% 
+  group_by(term_id) %>% 
+  filter(n_distinct(ensg_id) > 5) %>% 
+  ungroup() %>% 
+  arrange(term) 
+
+
+temp_data %>% 
+  filter(grepl("myel|oligo", gene_description))
+
+temp_data %>% 
+  filter(grepl("adhesion", term)) %T>% 
+  {pull(., 3) %>% 
+      unique() %>% 
+      print()} %>%
+  pull(gene_name) %>% 
+  unique() %>% 
+  sort() %>% 
+  paste(collapse = ", ")
+
+temp_data %>% 
+  filter(grepl("ion t", term)) %T>% 
+  {pull(., 4) %>% 
+      unique() %>% 
+      print()} %>%
+  pull(gene_name) %>% 
+  unique() %>% 
+  sort() %>% 
+  paste(collapse = ", ")
+
+gene_classification_long %>% 
+  select(1, 2, enhanced_tissues, dataset_id) %>%
+  filter(specificity_category %in% 
+           c("Tissue enriched",
+             "Group enriched")) %>% 
+  left_join(consensus_colors,
+            by = c("dataset_id", "enhanced_tissues" = "sample")) %>% 
+  group_by(dataset_id, color, specificity_category) %>% 
+  summarise(n = n_distinct(ensg_id),
+            tissues = paste(sort(enhanced_tissues), collapse = ";"))
+
+#####  Neurons
+
+
+gene_enrich_GO_ORA2 %>% 
+  select( -pvalue, -qvalue) %>% 
+  # filter(partition == "Inhibitory neurons") %>%
+  filter(partition == "Excitatory neurons") %>% 
+  select(Description, GeneRatio, p.adjust, odds_ratio, gene_name)
+
+temp_data <-
+  gene_classification_long %>% 
+  filter(specificity_category == "Group enriched",
+         enhanced_tissues == "Inhibitory neurons" |
+           enhanced_tissues == "Excitatory neurons") %>% 
+  group_by(ensg_id) %>% 
+  filter(all(c("Inhibitory neurons",
+               "Excitatory neurons") %in% enhanced_tissues)) %>% 
+  select(ensg_id) %>% 
+  distinct() %>% 
+  left_join(gene_info %>% 
+              select(2, 3, gene_description)) %>% 
+  inner_join(GO_BP) %>% 
+  group_by(term_id) %>% 
+  filter(n_distinct(ensg_id) > 5) %>% 
+  ungroup() %>% 
+  arrange(term) 
+
+temp_data$ensg_id %>% n_distinct
+# a <- 
+temp_data %>% 
+  select(ensg_id) %>% 
+  distinct() %>% 
+  left_join(gene_classification %>% 
+              filter(dataset_id == "singlecell")) %>% 
+  filter(grepl("Excit", enhanced_tissues),
+         grepl("Inhib", enhanced_tissues))
+
+temp_data %>% 
+  filter(grepl("synap", term)) %T>% 
+  {pull(., 4) %>% 
+      unique() %>% 
+      print()} %>%
+  pull(gene_name) %>% 
+  unique() %>% 
+  sort() %T>%
+  {length(.) %>% 
+      print} %>% 
+  paste(collapse = ", ")
+
+
+
+# gene_enrich_GO_ORA_simp %>% 
+#   select(1, 2) %>% 
+#   unite(id, dataset_id, partition, sep = "_") %>% 
+#   distinct() %>% 
+#   pull(1) %>% 
+#   l
+# 
+# gene_enrich_GO_ORA_simp %>% 
+#   group_by(dataset_id, partition) %>% 
+#   mutate(term_cluster = as.character(term_cluster),
+#          color = spread_colors(ggthemes::tableau_color_pal(palette = "Classic Cyclic")(13), n = n_distinct(parent))) %>% 
+#   ggplot(aes(area = score, subgroup = parentTerm)) +
+#   
+#   geom_treemap(aes(fill = term_cluster),
+#                color = "black",
+#                show.legend = F) +
+#   geom_treemap_subgroup_border(color = "black") +
+#   
+#   geom_treemap_text(aes(label = term),
+#                     colour = "black", 
+#                     place = "centre",
+#                     alpha = 0.4,
+#                     grow = TRUE) +
+#   
+#   geom_treemap_subgroup_text(place = "centre", 
+#                              grow = T, 
+#                              reflow = T,
+#                              alpha = 1, 
+#                              colour = "white", 
+#                              fontface = "bold",
+#                              min.size = 0) +
+#   
+#   scale_fill_identity() +
+#   theme_void() 
+
+```
+
+
+## Protein class summary
+
+```{r}
+
+plot_data <-
+  # raw_data[names(raw_data) %in%
+  #            c("tissue_region",
+  #              "blood_sample",
+  #              "celline_consensus",
+  #              "singlecell_sample")] %>% 
+  # list(blood = raw_data$blood_consensus,
+  #      tissue = raw_data$tissue_region,
+  #      singlecell = raw_data$singlecell_consensus,
+  #      celline = raw_data$celline_consensus) %>% 
+  consensus_data %>% 
+  map(. %>% gather(sample, ntpm, -1)) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  left_join(membr_secr_genes) 
+
+
+
 plot_data_sum <- 
   plot_data %>% 
-  left_join(membr_secr_genes) %>% 
-  group_by(cell_type, class) %>% 
-  summarise(ntpm = sum(ntpm)) %>% 
+  group_by(dataset_id, sample, class) %>% 
+  summarise(ntpm = sum(ntpm, na.rm = T)) %>% 
   mutate(frac = ntpm / sum(ntpm)) %>% 
-  ungroup() %>% 
-  mutate(cell_type = factor(cell_type, 
-                            consensus_clust_labelorder$cor_average$singlecell))
+  ungroup() 
 
 plot_data_sum %>% 
   write_tsv("data/processed/sc exp sum.tsv")
 
 plot_data_sum %>% 
-  ggplot(aes(frac, cell_type, fill = class)) +
+  filter(sample %in% 
+           c("Plasma cells",
+             "Hepatocytes",
+             "Exocrine glandular cells",
+             "Alveolar cells type 2",
+             "Cardiomyocytes"))
+
+plot_data_sum %>% 
+  group_by(dataset_id, class) %>% 
+  do({
+    quantile(.$frac, c(0.25, 0.5, 0.75)) %>% 
+      enframe
+  })%>% 
+  spread(name, value) %>% 
+  write_tsv("data/processed/sc exp sum IQR.tsv")
+
+plot_order <- 
+  c(#tissue_region_clust_labelorder$cor_average,
+    unlist(consensus_clust_labelorder$cor_average)) %>% 
+  unique()
+
+plots <-
+  plot_data_sum$dataset_id %>% 
+  unique() %>% 
+  lapply(function(dataset_id_) {
+    plot_data_sum %>% 
+      filter(dataset_id == dataset_id_) %>% 
+      mutate(sample = factor(sample, 
+                             plot_order)) %>% 
+      ggplot(aes(frac, sample, fill = class)) +
+      geom_col() +
+      scale_fill_manual(name = "Protein class", 
+                        values = protein_loc_palette) +
+      scale_x_continuous(expand = expansion(0)) +
+      labs(x = "Fraction of expression") +
+      theme_bw() +
+      theme(axis.title.y = element_blank(),
+            legend.position = "bottom") +
+      ggtitle(dataset_id_)
+    
+  })
+
+pdf(savepath("fraction secreted bar.pdf"),
+    width = 5, height = 10)
+plots
+dev.off()
+
+plot_data_sum %>% 
+  mutate(sample = factor(sample, 
+                         plot_order)) %>% 
+  ggplot(aes(frac, sample, fill = class)) +
   geom_col() +
+  facet_grid(dataset_id ~ ., space = "free", scales = "free")+
   scale_fill_manual(name = "Protein class", 
                     values = protein_loc_palette) +
   scale_x_continuous(expand = expansion(0)) +
   labs(x = "Fraction of expression") +
   theme_bw() +
   theme(axis.title.y = element_blank(),
-        legend.position = "bottom")
+        legend.position = "bottom") 
 
-ggsave(savepath("sc fraction secreted bar.pdf"),
-       width = 5, height = 10)
+ggsave(savepath("fraction secreted bar united.pdf"),
+       width = 5, height = 22)
 
 
-  
 plot_data_sum %>% 
   select(-ntpm) %>% 
   spread(class, frac) %>% 
-  ggplot(aes(membrane, secreted, color = cell_type)) +
+  ggplot(aes(membrane, secreted, color = sample)) +
   geom_abline(linetype = "dotted",
               color = "gray") +
   geom_point(show.legend = F) +
@@ -1084,12 +2272,45 @@ plot_data_sum %>%
               filter(secreted > 0.2 |
                        membrane > 0.5 |
                        intracellular > 0.85),
-            aes(label = cell_type),
+            aes(label = sample),
             show.legend = F, 
             size = 3,
             vjust = 0,
             hjust = -0.05) +
-  
+  facet_wrap(~dataset_id) +
+  scale_x_continuous(limits = 0:1, 
+                     expand = expansion(0)) + 
+  scale_y_continuous(limits = 0:1,
+                     expand = expansion(0)) +
+  scale_color_manual(values = consensus_palette) +
+  coord_fixed() +
+  labs(title = "Fraction of expression",
+       x = "Membrane proteins",
+       y = "Secreted proteins") +
+  theme_bw()
+
+ggsave(savepath("fraction secreted vs membrane.pdf"),
+       width = 10, height = 10)
+
+
+plot_data_sum %>% 
+  filter(dataset_id == "singlecell") %>% 
+  select(-ntpm) %>% 
+  spread(class, frac) %>% 
+  ggplot(aes(membrane, secreted, color = sample)) +
+  geom_abline(linetype = "dotted",
+              color = "gray") +
+  geom_point(show.legend = F) +
+  geom_text(data = . %>% 
+              filter(secreted > 0.2 |
+                       membrane > 0.5 |
+                       intracellular > 0.85),
+            aes(label = sample),
+            show.legend = F, 
+            size = 3,
+            vjust = 0,
+            hjust = -0.05) +
+  # facet_wrap(~dataset_id) +
   scale_x_continuous(limits = 0:1, 
                      expand = expansion(0)) + 
   scale_y_continuous(limits = 0:1,
@@ -1103,6 +2324,176 @@ plot_data_sum %>%
 
 ggsave(savepath("sc fraction secreted vs membrane.pdf"),
        width = 5, height = 5)
+
+plot_data_sum %>% 
+  filter(dataset_id == "singlecell") %>% 
+  select(-ntpm) %>% 
+  spread(class, frac) %>% 
+  ggplot(aes(membrane, secreted, color = sample)) +
+  geom_abline(linetype = "dotted",
+              color = "gray") +
+  geom_point(show.legend = F,
+             size = 0.5) +
+  geom_text(data = . %>% 
+              filter(secreted > 0.2 |
+                       membrane > 0.5 |
+                       intracellular > 0.85),
+            aes(label = sample),
+            show.legend = F, 
+            size = 3,
+            vjust = 0,
+            hjust = -0.05) +
+  # facet_wrap(~dataset_id) +
+  scale_x_continuous(limits = 0:1, 
+                     expand = expansion(0), 
+                     breaks = 0:1) + 
+  scale_y_continuous(limits = 0:1,
+                     expand = expansion(0),
+                     breaks = 0:1) +
+  scale_color_manual(values = consensus_palette) +
+  coord_fixed() +
+  labs(title = "Fraction of expression",
+       x = "Membrane proteins",
+       y = "Secreted proteins") +
+  theme_bw()
+
+ggsave(savepath("sc fraction secreted vs membrane small.pdf"),
+       width = 3, height = 3)
+
+
+
+
+
+#################################################################
+
+plot_data_sum <-
+  plot_data %>% 
+  # filter(dataset_id == "singlecell") %>% 
+  select(1:4, class) %>%
+  left_join(gene_info %>% 
+              select(ensg_id, gene_name)) %>% 
+  group_by(dataset_id, sample) %>% 
+  mutate(frac_exp = ntpm / sum(ntpm, na.rm = T),
+         sign_exp = frac_exp > 0.03,
+         gene_name = ifelse(sign_exp, 
+                            gene_name, 
+                            NA)) %>% 
+  group_by(dataset_id, sample, class, gene_name) %>% 
+  summarise(frac_exp = sum(frac_exp, na.rm = T)) %>% 
+  ungroup() %>% 
+  arrange(frac_exp) %>% 
+  mutate(sample = factor(sample, plot_order),
+         gene_name = factor(gene_name, c(unique(gene_name), NA)),
+         class = factor(class, c("secreted",
+                                 "membrane/secreted",
+                                 "membrane",
+                                 "intracellular")))
+
+plot_data_sum %>% 
+  arrange(-frac_exp) %>% 
+  filter(str_detect(sample, "Alve"))
+
+plot_data_sum %>% 
+  arrange(-frac_exp) %>% 
+  filter(str_detect(sample, "Card"))
+
+
+plot_data_sum %>% 
+  arrange(-frac_exp) %>% 
+  filter(str_detect(sample, "Exo"))
+
+consensus_data$singlecell %>% 
+  select(1, "Exocrine glandular cells") %>% 
+  left_join(gene_info %>% 
+              select(2,3)) %>% 
+  filter(gene_name %in% 
+           c("PRSS2",
+             "PRSS1",
+             "REG1A"))
+
+plot_data_sum %>% 
+  arrange(-frac_exp) %>% 
+  filter(str_detect(sample, "Exo")) %>% 
+  filter(!is.na(gene_name)) %>% 
+  pull(frac_exp) %>% 
+  sum
+
+plot_data_sum %>%
+  # filter(sample %in% c("Erythroid cells",
+  #                      "Late spermatids")) %>% 
+  arrange(gene_name) %>% 
+  ggplot(aes(frac_exp, sample, fill = class, #group = gene_name,
+             label = gene_name)) +
+  geom_col(color = "white",
+           position = position_stack(vjust = 0.5)) +
+  geom_text(position = position_stack(vjust = 0.5),
+            color = "white",
+            size = 2) +
+  facet_grid(dataset_id ~ ., space = "free", scales = "free")+
+  scale_fill_manual(values = protein_loc_palette) +
+  scale_x_reverse(expand = expansion()) + 
+  theme_bw() + 
+  theme(legend.position = "top")
+ggsave(savepath("protein class bar genes highlight.pdf"),
+       width = 14, height = 30)  
+
+
+
+plot_data_sum %>%
+  filter(dataset_id %in% "singlecell") %>% 
+  # filter(sample %in% c("Erythroid cells",
+  #                      "Late spermatids")) %>% 
+  arrange(gene_name) %>% 
+  ggplot(aes(frac_exp, sample, fill = class, #group = gene_name,
+             label = gene_name)) +
+  geom_col(color = "white",
+           position = position_stack(vjust = 0.5)) +
+  geom_text(position = position_stack(vjust = 0.5),
+            color = "white",
+            size = 2) +
+  facet_grid(dataset_id ~ ., space = "free", scales = "free")+
+  scale_fill_manual(values = protein_loc_palette) +
+  scale_x_reverse(expand = expansion()) + 
+  theme_bw() + 
+  theme(legend.position = "top")
+ggsave(savepath("sc protein class bar genes highlight.pdf"),
+       width = 14, height = 10)  
+
+
+plot_data_sum %>% 
+  filter(!is.na(gene_name),
+         dataset_id == "singlecell") %>% 
+  arrange(-frac_exp) %>% 
+  group_by(sample) %>% 
+  top_n(1, frac_exp) %>% 
+  print(n = 50)
+
+plot_data_sum %>%
+  filter(dataset_id %in% "singlecell") %>% 
+  filter(sample %in% c("Erythroid cells",
+                       "Cardiomyocytes",
+                       "Late spermatids",
+                       "Alveolar cells type 2",
+                       "Melanocytes",
+                       "Proximal enterocytes")) %>%
+  arrange(gene_name) %>% 
+  ggplot(aes(frac_exp, sample, fill = class, #group = gene_name,
+             label = gene_name)) +
+  geom_col(color = "white",
+           position = position_stack(vjust = 0.5)) +
+  geom_text(position = position_stack(vjust = 0.5),
+            color = "white",
+            size = 2) +
+  facet_grid(dataset_id ~ ., space = "free", scales = "free")+
+  scale_fill_manual(values = protein_loc_palette) +
+  scale_x_reverse(expand = expansion()) + 
+  theme_bw() + 
+  theme(legend.position = "top")
+ggsave(savepath("sc protein class bar genes highlight examples.pdf"),
+       width = 14, height = 5)  
+
+
+
 ```
 
 
@@ -1133,7 +2524,7 @@ plot_names <-
         select(-1) %>% 
         names() %>% 
         enframe("i", "sample")
-      ) %>% 
+  ) %>% 
   bind_rows(.id = "dataset_id") %>% 
   select(-i)
 
@@ -1177,6 +2568,66 @@ plot_cor[plot_names$sample[which(plot_names$dataset_id == "singlecell_consensus"
            filename = savepath("sc vs all cor heatmap.pdf"),
            width = 20, height = 12)
 dev.off()
+
+
+plot_cor[plot_names$sample[which(plot_names$dataset_id == "singlecell_consensus")],
+         plot_names$sample[which(plot_names$dataset_id == "tissue_region")]] %>% 
+  pheatmap(color = cor_heatmap_palette(100),
+           border_color = F,
+           annotation_legend = F,
+           clustering_method = "average", 
+           # clustering_distance_cols = "maximum",
+           # clustering_distance_rows = "maximum",
+           
+           # cluster_rows = consensus_clust_cor_average$singlecell,
+           # cluster_cols = tissue_region_clust_cor_average,
+           annotation_row = plot_names2 %>% 
+             select(-1) %>% 
+             mutate(rowname = sample) %>% 
+             column_to_rownames("rowname"),
+           annotation_col = plot_names2 %>%
+             select(-1) %>% 
+             mutate(rowname = sample) %>% 
+             column_to_rownames("rowname"),
+           annotation_colors = list(sample = region_palette),
+           cellheight = 8, 
+           cellwidth = 8,
+           filename = savepath("sc vs tissue cor heatmap.pdf"),
+           width = 11, height = 12)
+dev.off()
+
+unique(plot_names$dataset_id) %>% 
+  {.[which(. != "singlecell_consensus")]} %>% 
+  lapply(function(ds_id) {
+    plot_cor[plot_names$sample[which(plot_names$dataset_id == "singlecell_consensus")],
+             plot_names$sample[which(plot_names$dataset_id == ds_id)]] %>% 
+      pheatmap(color = cor_heatmap_palette(100),
+               border_color = F,
+               annotation_legend = F,
+               clustering_method = "average", 
+               # clustering_distance_cols = "maximum",
+               # clustering_distance_rows = "maximum",
+               
+               # cluster_rows = consensus_clust_cor_average$singlecell,
+               # cluster_cols = tissue_region_clust_cor_average,
+               annotation_row = plot_names2 %>% 
+                 select(-1) %>% 
+                 mutate(rowname = sample) %>% 
+                 column_to_rownames("rowname"),
+               annotation_col = plot_names2 %>%
+                 select(-1) %>% 
+                 mutate(rowname = sample) %>% 
+                 column_to_rownames("rowname"),
+               annotation_colors = list(sample = region_palette),
+               cellheight = 8, 
+               cellwidth = 8,
+               filename = savepath(paste0("sc vs ",
+                                          ds_id,
+                                          " cor heatmap.pdf")),
+               width = 13, height = 13)
+    # dev.off()
+  })
+
 long_heatmap_data <- 
   plot_combos %>% 
   filter(ds1 == "singlecell_consensus") %>% 
@@ -1237,9 +2688,42 @@ plot_data2 %>%
   theme(axis.text.x = element_text(angle = 90,
                                    hjust = 1, 
                                    vjust = 0.5))
-  
 
 
+
+```
+
+#### Intra dataset correlation
+
+```{r}
+intrads_cor <- 
+  consensus_data %>% 
+  map(. %>% 
+        column_to_rownames("ensg_id") %>% 
+        # head() %>% 
+        cor(method = "spearman",
+            use = "pairwise.complete.obs"))  
+
+names(intrads_cor) %>% 
+  lapply(function(ds_) {
+    intrads_cor[[ds_]] %>% 
+      pheatmap(color = cor_heatmap_palette(100),
+               border_color = F,
+               annotation_legend = F,
+               cluster_rows = consensus_clust_cor_average[[ds_]], 
+               cluster_cols = consensus_clust_cor_average[[ds_]], 
+               annotation_col = colnames(intrads_cor[[ds_]]) %>% 
+                 enframe() %>% 
+                 mutate(`Cell/tissue type` = value) %>% 
+                 select(-1) %>% 
+                 column_to_rownames("value"),
+               annotation_colors = list("Cell/tissue type" = consensus_palette),
+               cellheight = 8, 
+               cellwidth = 8,
+               filename = savepath(paste(ds_, "intra cor heatmap.pdf")),
+               width = 13, height = 12)
+  })
+dev.off()
 ```
 
 
@@ -1397,7 +2881,7 @@ plot_combo_data <-
 
 plot_combo_data %>% 
   filter(sample1 == "amygdala")
-  filter(sample2 == "Smooth muscle cells")
+filter(sample2 == "Smooth muscle cells")
 plot_cor["amygdala",] %>% 
   enframe() %>% 
   arrange(-value) %>% 
@@ -1587,13 +3071,185 @@ plots <-
 
 
 pdf(savepath("dataset correlation sc vs each top3.pdf"),
-       width = 6, height = 6)
+    width = 6, height = 6)
 plots
 dev.off()
 
 ```
 
-### Correlation SC - tissue
+#### Networks v2
+```{r}
+
+
+plot_genes <- 
+  gene_classification %>%
+  filter(dataset_id %in% c("singlecell",
+                           "tissue")) %>% 
+  filter(specificity_category %in% c("Tissue enriched",
+                                     "Group enriched")) %>% 
+  select(ensg_id) %>% 
+  distinct()
+
+plot_cor <- 
+  plot_data[c("singlecell_consensus",
+              "blood_consensus",
+              "tissue_region")] %>% 
+  map(. %>% 
+        gather(sample, ntpm, -1)) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  filter(ensg_id %in% plot_genes$ensg_id) %>% 
+  unite(sample, dataset_id, sample, sep = ";") %>% 
+  # filter(ensg_id %in% sample(ensg_id, 1000)) %>% 
+  widyr::pairwise_cor(item = sample, 
+                      feature = ensg_id, 
+                      value = ntpm, 
+                      method = "spearman") %>% 
+  
+  separate(item1, into = c("ds1", "item1"), sep = ";") %>% 
+  separate(item2, into = c("ds2", "item2"), sep = ";") 
+
+plot_names <- 
+  plot_data[c("singlecell_consensus",
+              "blood_consensus",
+              "tissue_region")] %>% 
+  map(. %>% 
+        select(-1) %>% 
+        names() %>% 
+        enframe("i", "sample")
+  ) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  select(-i)
+
+plot_cor %>% 
+  ggplot(aes(correlation)) +
+  geom_density() +
+  facet_grid(ds1 ~ ds2)
+
+
+plot_cor %>% 
+  arrange(-correlation) %>% 
+  filter(grepl("cortex", item1)) %>% 
+  filter(ds1 != ds2) 
+
+# plot_data[c("singlecell_consensus", "tissue_region")] %>% 
+#   map(. %>% select(any_of(c("ensg_id", "cerebral cortex", "Smooth muscle cells", "Excitatory neurons"))) %>% 
+#         gather(tis, val, -1)) %>%
+#   bind_rows() %>% 
+#   
+#   spread(tis, val) %>%
+#   ggplot(aes(`cerebral cortex` +1, `Excitatory neurons` + 1)) +
+#   geom_point() +
+#   scale_x_log10() +
+#   scale_y_log10()
+
+plot_cor_filtered <- 
+  plot_cor %>%
+  filter(correlation > 0.6) %>% 
+  filter(ds1 != ds2) %>% 
+  group_by(ds1, ds2, item1) %>% 
+  top_n(3, correlation) %>% 
+  ungroup()
+
+plot_cor %>% 
+  # filter(ds1 != ds2) %>% 
+  select(item1, item2, correlation) %>% 
+  spread(item2, correlation) %>% 
+  column_to_rownames("item1") %>% 
+  pheatmap()
+# group_by_all() %>% 
+#   mutate(id = paste(sort(c(sample1, sample2)), collapse = "_")) %>% 
+#   group_by(id) %>% 
+#   slice(1) %>% 
+#   ungroup()
+
+set.seed(43)
+plot_cor_graph <- 
+  plot_cor_filtered %>%
+  select(item1, item2, correlation) %>% 
+  as_tbl_graph(directed = F) %>% 
+  left_join(plot_names %>% 
+              select(name = sample, 
+                     dataset = dataset_id) %>% 
+              distinct(),
+            by = "name") %>% 
+  mutate(cluster = group_louvain() %>% 
+           as.character()) 
+
+
+set.seed(430)
+plot_cor_graph %>% 
+  create_layout(layout = 'nicely') %>% 
+  ggraph() + 
+  ggalt::geom_encircle(aes(x, y, 
+                           fill = cluster),
+                       color = NA, 
+                       alpha = 0.2,
+                       s_shape=0.5,
+                       expand = 0.01,
+                       show.legend = F) +
+  geom_edge_link(color = "gray80", 
+                 width = 0.1) +
+  geom_node_point(aes(color = name,
+                      shape = dataset),
+                  show.legend = T) +
+  geom_node_text(aes(label = name),
+                 size = 2,
+                 vjust = -0.5) +
+  scale_color_manual(values = region_palette,
+                     guide = "none") +
+  scale_fill_discrete(guide = "none") +
+  theme_void() + 
+  coord_fixed() +
+  ggtitle("top3 >0.6 spearman correlation",
+          "Only enriched genes")
+
+ggsave(savepath("dataset enriched correlation network top2 06.pdf"),
+       width = 10, height = 10)
+
+set.seed(430)
+plot_cor_graph %>% 
+  create_layout(layout = 'nicely') %>% 
+  ggraph() + 
+  ggalt::geom_encircle(aes(x, y, 
+                           fill = cluster),
+                       color = NA, 
+                       alpha = 0.2,
+                       s_shape=0.5,
+                       expand = 0.01,
+                       show.legend = F) +
+  geom_edge_link(color = "gray80", 
+                 width = 0.1) +
+  geom_node_point(aes(color = name,
+                      shape = dataset),
+                  show.legend = T) +
+  scale_color_manual(values = region_palette,
+                     guide = "none") +
+  scale_fill_discrete(guide = "none") +
+  theme_void() + 
+  coord_fixed() 
+
+ggsave(savepath("dataset enriched correlation network top2 06 mini.pdf"),
+       width = 6, height = 4)
+
+
+
+plot_cor_graph %>% 
+  as_tibble() %>% 
+  mutate(node_id = row_number()) %>% 
+  select(node_id, everything()) %>% 
+  write_csv(savepath("dataset enriched correlation network top2 06 nodedata.csv"))
+
+plot_cor_graph %>% 
+  activate(edges) %>% 
+  as_tibble() %>% 
+  write_csv(savepath("dataset enriched correlation network top2 06 edgedata.csv"))
+
+
+
+```
+
+
+### Correlation SC sample - tissue
 
 ```{r}
 
@@ -1604,6 +3260,7 @@ dev.off()
 #   summarise(cor = cor(ntpm, `amygdala`, method = "spearman")) %>% 
 #   arrange(-cor)
 # 
+
 singlecell_cluster_data <- 
   raw_data$singlecell_sample %>% 
   gather(sample, ntpm, -1) %>% 
@@ -1637,7 +3294,7 @@ sc_tissue_mapping <-
                                  tissue2 == "skin" ~ "skin 1",
                                  tissue2 == "stomach" ~ "stomach 1",
                                  T ~ tissue_name)) 
-  
+
 sc_tissue_joined_data <- 
   singlecell_cluster_data %>% 
   left_join(sc_tissue_mapping) %>% 
@@ -1645,7 +3302,7 @@ sc_tissue_joined_data <-
             by = c("ensg_id", "tissue_name"),
             suffix = c("_sc", "_tissue")) %>% 
   select(ensg_id, sample, tissue, tissue_name, cell_type, cluster, ntpm_sc, ntpm_tissue)
-  
+
 plot_cor <- 
   sc_tissue_joined_data %>% 
   group_by(tissue, tissue_name, cell_type) %>% 
@@ -1672,10 +3329,62 @@ plot_cor <-
 plot_cor %>% 
   ggplot(aes(cor, tissue_name, label = cell_type)) +
   geom_text()
+plot_cor %>% 
+  arrange(-cor)
 
 rm(singlecell_cluster_data, tissue_region_data)
 
+plot <- 
+  c("adipose tissue"= "Adipocytes",
+    "thymus"= "T-cells",
+    "placenta"= "Cytotrophoblasts",
+    "placenta"= "Fibroblasts",
+    "endometrium 1"= "Endometrial stromal cells",
+    "liver"= "Hepatocytes",
+    "retina" = "Rod photoreceptor cells",
+    "skeletal muscle" = "Myocytes",
+    "testis" = "Spermatocytes") %>% 
+  enframe("tissue", "cell_type") %>% 
+  
+  left_join(raw_data$tissue_region %>% 
+              gather(tissue, ntpm_tissue, -1)) %>% 
+  left_join(raw_data$singlecell_consensus %>% 
+              gather(cell_type, ntpm_sc, -1)) %>%
+  
+  ggplot(aes(log10(ntpm_sc + 1), 
+             log10(ntpm_tissue + 1))) +
+  geom_abline(linetype = "dotted") +
+  geom_hex(aes(alpha = stat(log10(count))),
+           bins = 20,
+           fill = "orangered") + 
+  geom_text(data = . %>% 
+              group_by(tissue, cell_type) %>% 
+              summarise(cor = cor(ntpm_tissue, ntpm_sc, method = "spearman")),
+            aes(x = 0, y = 5,
+                label = round(cor, 3)),
+            hjust = 0, 
+            vjust = 1)+
+  facet_wrap(tissue ~ cell_type) +
+  scale_x_continuous(limits = c(0, 5), expand = expansion(0.02)) +
+  scale_y_continuous(limits = c(0, 5), expand = expansion(0.02)) +
+  coord_fixed() +
+  theme_bw()
 
+ggsave(savepath("tissue sc cor example scatters.pdf"),
+       plot = plot,
+       width = 6, height = 6)
+ggsave(savepath("tissue sc cor example scatters small.pdf"),
+       plot = plot,
+       width = 4, height = 4)
+
+plot + 
+  # theme_void() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        panel.border = element_rect(fill = NA))
+ggsave(savepath("tissue sc cor example scatters small example.pdf"),
+       width = 4, height = 4)
 
 temp_sc_data <- 
   raw_data$singlecell_consensus %>% 
@@ -1701,7 +3410,7 @@ sc_tissue_cor %>%
   spread(tissue, cor) %>% 
   column_to_rownames("cell_type") %>% 
   
-
+  
   pheatmap(clustering_method = "ward.D2",
            # clustering_distance_rows = 
            
@@ -2863,11 +4572,283 @@ ggsave(savepath("UMAP example plot p6.png"),
 
 ```
 
-# Sample UMAPs
+# Neighborhood networks
 
 ```{r}
 
-sample_UMAPs <- 
+gene_graphs <- 
+  file_structure %>% 
+  map(function(x) x$graph) %>% 
+  map(function(x) {
+    file_ <- paste(x, "neighbors.rds", sep = "/")
+    if(file.exists(file_)) {
+      readRDS(file_)
+    } else {
+      NULL
+    }
+  }) 
+
+gene_nn <- 
+  file_structure %>% 
+  map(function(x) x$distance) %>% 
+  map(function(x) {
+    file_ <- paste(x, "nearest_neighbors.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id")
+
+
+
+
+
+make_nn_plot <- 
+  function(example_gene, 
+           example_ds, 
+           example_passes) {
+    nn_data <- 
+      gene_nn %>% 
+      filter(dataset_id == example_ds) %>% 
+      select(gene, neighbor_gene, cor)
+    
+    nn_genes <- 
+      nn_data %>% 
+      filter(gene == example_gene) %>% 
+      mutate(pass = 1)
+    
+    for(i in 2:example_passes) {
+      nn_genes <- 
+        nn_data %>% 
+        filter(gene %in% nn_genes$neighbor_gene) %>% 
+        mutate(pass = i) %>% 
+        bind_rows(nn_genes)
+      
+    }
+    
+    nn_genes <- 
+      nn_genes %>% 
+      group_by(gene, neighbor_gene, cor) %>% 
+      top_n(1, -pass) %>% 
+      ungroup()
+    
+    example_gene_name <- 
+      gene_info %>% 
+      filter(ensg_id == example_gene) %>% 
+      pull(gene_name)
+    
+    nn_genes %>% 
+      # select(1:3) %>% 
+      filter(gene != neighbor_gene) %>% 
+      as_tbl_graph() %>% 
+      left_join(nn_genes %>% 
+                  select(name = gene, 
+                         pass) %>% 
+                  distinct()) %>% 
+      ggraph(layout = "stress") +
+      geom_edge_link(aes(alpha = -pass),
+                     width = 0.1,
+                     show.legend = F) +
+      # geom_node_point(aes(color = pass)) +
+      geom_node_point(data = . %>% 
+                        filter(name == example_gene),
+                      color = "red", 
+                      size = 4) + 
+      coord_fixed() +
+      ggtitle(paste(example_gene_name, example_gene))
+    
+  }
+
+plots <- 
+  c("ENSG00000110200",
+    "ENSG00000163631",
+    "ENSG00000198712",
+    "ENSG00000175646",
+    "ENSG00000115386") %>% 
+  lapply(function(x) {
+    make_nn_plot(x, 
+                 "singlecell",
+                 4)
+  })
+
+gene_info %>%
+  filter(gene_name == "MT-CO1")
+# example_gene <- sample(unique(gene_nn$gene), 1)
+# example_ds <- "singlecell"
+# example_passes <- 3
+
+
+  
+pdf(savepath("Example gene neighborhood.pdf"),
+       width = 5, height = 5)
+plots
+dev.off()
+
+
+gene_nn %>% 
+  filter(dataset_id == "singlecell",
+         gene == "ENSG00000198804") %>% 
+  select(ensg_id = neighbor_gene) %>% 
+  left_join(consensus_data$singlecell) %>% 
+  left_join(gene_info %>% 
+              select(2, 3)) %>% 
+  select(1, gene_name, everything()) %>% 
+  gather(sample, ntpm, -1, -2) %>%
+  mutate(gene_name = factor(gene_name, unique(gene_name)),
+         sample = factor(sample, consensus_clust_labelorder$cor_average$singlecell)) %>% 
+  ggplot(aes(sample, ntpm, fill = sample)) +
+  geom_col(show.legend = F) +
+  facet_grid(gene_name ~ ., scales = "free_y") +
+  scale_fill_manual(values = consensus_palette) +
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+ggsave(savepath("MT-CO2 neighborhood bar.pdf"),
+       height = 18, width = 11)
+
+
+#####################3
+plot_data <- 
+  gene_nn %>% 
+  filter(dataset_id == "singlecell") %>% 
+  left_join(clustering_data) %>% 
+  left_join(clustering_data,
+            by = c("neighbor_gene" = "gene", "dataset_id"),
+            suffix = c("", "_nn")) %>%
+  filter(cluster != cluster_nn) %>% 
+  left_join(umap_data %>% select(1, 2, 5, 6)) %>% 
+  left_join(umap_data %>% select(1, 2, 5, 6),
+            by = c("neighbor_gene" = "gene", "dataset_id"),
+            suffix = c("", "_nn"))
+  
+
+umap_poly_centers <-
+  umap_centers %>%
+  left_join(cluster_annotation)
+
+plot_data2 <- 
+  plot_data %>% 
+  group_by(dataset_id, cluster, cluster_nn) %>% 
+  count %>% 
+  ungroup() %>% 
+  left_join(umap_poly_centers %>% 
+              select(dataset_id, cluster, x, y)) %>% 
+  left_join(umap_poly_centers %>% 
+              select(dataset_id, cluster, x, y),
+            by = c("dataset_id", "cluster_nn" = "cluster"),
+            suffix = c("", "_nn"))  
+  
+
+umap_poly_data_colored <- 
+  umap_poly_data %>%
+  left_join(umap_poly_data %>% 
+              select(dataset_id, cluster) %>% 
+              distinct() %>% 
+              group_by(dataset_id) %>% 
+              mutate(cluster_color = colorRampPalette(ggthemes::tableau_color_pal(palette = "Classic Cyclic")(13))(n_distinct(cluster))))
+
+umap_poly_data_colored %>% 
+  filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+  geom_segment(data = plot_data,
+               aes(x = UMAP_1_scaled, 
+                   y = UMAP_2_scaled, 
+                   xend = UMAP_1_scaled_nn, 
+                   yend = UMAP_2_scaled_nn),
+               inherit.aes = F) +
+  geom_point(data = umap_data %>% 
+               filter(dataset_id == "singlecell"),
+             aes(UMAP_1_scaled, 
+                 UMAP_2_scaled),
+             color = "black",
+             size = 0.1,
+             inherit.aes = F) +
+  geom_polygon(show.legend = F,
+               color = "black",
+               size = 0.1) +
+  
+  # geom_text(data = umap_poly_centers %>% 
+  #             filter(dataset_id == "tissue") ,
+  #           aes(x, y, label = full_annotation),
+  #           size = 3,
+  #           inherit.aes = F) +
+  scale_fill_identity() +
+  coord_fixed() +
+  theme_void() 
+
+umap_poly_data_colored %>% 
+  filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(X, Y, fill = cluster_color, group = paste(cluster, sub_cluster))) +
+  geom_segment(data = plot_data2,
+               aes(x = x, 
+                   y = y, 
+                   xend = x_nn, 
+                   yend = y_nn,
+                   alpha = n),
+               inherit.aes = F) +
+  geom_point(data = umap_data %>% 
+               filter(dataset_id == "singlecell"),
+             aes(UMAP_1_scaled, 
+                 UMAP_2_scaled),
+             color = "black",
+             size = 0.1,
+             inherit.aes = F) +
+  geom_polygon(show.legend = F,
+               color = "black",
+               size = 0.1) +
+  
+  # geom_text(data = umap_poly_centers %>% 
+  #             filter(dataset_id == "tissue") ,
+  #           aes(x, y, label = full_annotation),
+  #           size = 3,
+  #           inherit.aes = F) +
+  scale_fill_identity() +
+  coord_fixed() +
+  theme_void() 
+
+
+
+umap_poly_data_colored %>% 
+  # filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(X, Y, fill = cluster_color, group = polygon_id)) +
+
+  geom_point_rast(data = umap_data,
+                  aes(UMAP_1_scaled,
+                      UMAP_2_scaled),
+                  color = "black",
+                  size = 0.1,
+                  shape = 16,
+                  inherit.aes = F) +
+  geom_polygon(show.legend = F,
+               color = "black",
+               size = 0.1) +
+  geom_path(data = umap_poly_data_colored %>% 
+              group_by(dataset_id, cluster, polygon_id, cluster_color) %>% 
+              summarise(X = mean(X),
+                        Y = mean(Y)),
+            aes(X, Y, group = cluster, color = cluster_color),
+            inherit.aes = F,
+            show.legend = F,
+            size = 0.1, 
+            linetype = "dotted") +
+  
+  facet_wrap(~dataset_id) +
+  scale_fill_identity() +
+  scale_color_identity() +
+  coord_fixed() +
+  theme_void() 
+ggsave(savepath("UMAP disconnected clusters.pdf"),
+       width = 8, height = 8)
+
+```
+
+
+# Sample PCA + UMAP
+
+```{r}
+
+sample_PCAs <- 
   raw_data[names(raw_data) %in%
              c("blood_sample",
                "blood_consensus",
@@ -2886,18 +4867,106 @@ sample_UMAPs <-
                    zscore_scale = T) %>% 
         do_pca() %>% 
         get_pca_scores(use_R2cum_PCselection = T,
-                       R2cum_lim = 0.8) %>% 
+                       R2cum_lim = 0.8))
+
+
+sample_UMAPs <- 
+  sample_PCAs %>%
+  map(. %>% 
         do_umap(n_neighbors = floor(sqrt(dim(.)[1]))) %>%
         # do_umap(n_neighbors = dim(.)[2]) %>% 
         as_tibble(rownames = "sample"))
 
-# sample_UMAPs %>% 
-#   bind_rows(.id = "dataset_id") %>% 
-#   ggplot(aes(UMAP1, UMAP2, color = sample)) +
-#   geom_point(show.legend = F) + 
-#   facet_wrap(~dataset_id, scales = "free") +
-#   scale_color_manual(values = region_palette) +
-#   theme_bw()
+plot_data <- 
+  list(PCA = sample_PCAs %>%
+         map(. %>% 
+               as_tibble(rownames = "sample")) %>% 
+         bind_rows(.id = "dataset_id") %>% 
+         select(1, 2, V1 = PC1, V2 = PC2),
+       UMAP = sample_UMAPs %>% 
+         bind_rows(.id = "dataset_id") %>% 
+         select(1, 2, V1 = UMAP1, V2 = UMAP2)) %>% 
+  bind_rows(.id = "type") %>% 
+  filter(dataset_id %in% c("tissue_region",
+                           "blood_sample",
+                           "celline_consensus",
+                           "singlecell_sample")) %>% 
+  mutate(dataset_id = factor(dataset_id, c("singlecell_sample",
+                                           "tissue_region",
+                                           "blood_sample",
+                                           "celline_consensus")),
+         sample_name = 
+           case_when(dataset_id == "singlecell_sample" ~
+                       sample %>% 
+                       str_extract("_.*_") %>% 
+                       str_replace_all("_", ""),
+                     dataset_id == "blood_sample" ~
+                       sample %>% 
+                       str_replace("_.*", ""),
+                     T ~ sample)) %>% 
+  gather(component, value, V1, V2) %>% 
+  group_by(type, dataset_id, component) %>% 
+  mutate(value = value - ((max(value) + min(value)) / 2)) %>% 
+  group_by(type, dataset_id) %>% 
+  mutate(value = scales::rescale(value, to = c(-1, 1))) %>% 
+  ungroup() %>% 
+  spread(component, value) 
+
+plot <-
+  plot_data %>% 
+  ggplot(aes(V1, V2, color = sample_name)) +
+  geom_point(show.legend = F,
+             size = 0.5) +
+  facet_grid(dataset_id ~ type) +
+  coord_fixed() +
+  scale_color_manual(values = region_palette) +
+  # theme_void() +
+  theme(panel.border = element_rect(fill = NA,
+                                    color = "gray70"),
+        axis.ticks = element_blank(),
+        axis.text = element_blank(),
+        panel.grid = element_blank(),
+        panel.background = element_blank(),
+        strip.background = element_blank(),
+        strip.text.y = element_text(angle = -90)) +
+  labs(x = "Component 1",
+       y = "Component 2")
+ggsave(savepath("sample PCA UMAP combo.pdf"), plot = plot,
+       width = 5, height = 10)
+
+plot +
+  geom_text_repel(data = . %>%
+                    group_by(dataset_id, type, sample_name) %>%
+                    summarise(V1 = mean(V1),
+                              V2 = mean(V2)) %>%
+                    arrange(sample(1:nrow(.))) %>%
+                    head(round(nrow(.) * 0.15)),
+                  aes(label = sample_name),
+                  size = 2,
+                  max.overlaps = 15,
+                  box.padding = 0.05,
+                  show.legend = F) 
+ggsave(savepath("sample PCA UMAP combo labeled.pdf"),
+       width = 5, height = 10)
+
+
+ggplotly(plot + 
+           # geom_rect(xmin = -1.05,
+           #           xmax = 1.05,
+           #           ymin = -1.05, 
+           #           ymax = 1.05,
+           #           color = "black",
+           #           fill = NA) +
+           facet_grid(type ~ dataset_id) +
+           theme(panel.spacing.y = unit(0.2, "lines"),
+                 panel.background = element_rect(color = NA,
+                                                 fill = "gray95")),
+         height = 800, width = 1600) %>% 
+  hide_legend() %>% 
+  as_widget() %>% 
+  htmlwidgets::saveWidget(savepath("sample PCA UMAP combo interactive.html"))
+
+#########################
 
 sample_UMAPs$singlecell_sample %>% 
   separate(sample, into = c("tissue", "cell_type", "cluster"), sep = "_") %>% 
@@ -2928,12 +4997,12 @@ plots <-
              plot_data <- 
                sample_UMAPs[[ds_name]] %>% 
                separate(sample, into = c("tissue", "sample", "cluster"), sep = "_")
-               
+             
            } else if(ds_name == "blood_sample") {
              plot_data <- 
                sample_UMAPs[[ds_name]] %>% 
                separate(sample, into = c("sample", "id1", "id2"), sep = "_")
-               
+             
            } else {
              plot_data <- 
                sample_UMAPs[[ds_name]]
@@ -2976,12 +5045,12 @@ plots <-
              plot_data <- 
                sample_UMAPs[[ds_name]] %>% 
                separate(sample, into = c("tissue", "sample", "cluster"), sep = "_")
-               
+             
            } else if(ds_name == "blood_sample") {
              plot_data <- 
                sample_UMAPs[[ds_name]] %>% 
                separate(sample, into = c("sample", "id1", "id2"), sep = "_")
-               
+             
            } else {
              plot_data <- 
                sample_UMAPs[[ds_name]]
@@ -3089,7 +5158,7 @@ comb_UMAP_processing <-
                      R2cum_lim = 0.8) 
   }
 
-  
+
 combined_PCA <- 
   comb_UMAP_processing(plot_data)
 
@@ -3255,12 +5324,12 @@ if(file.exists("data/processed/tissue_sample_pca.rds")) {
     column_to_rownames("ensg_id") %>% 
     remove_genes(rm_NA_genes = T,
                  rm_not_expressed = T, 
-                 not_expressed_lim = 1,
+                 not_expressed_lim = 5,
                  rm_no_variance = T) %>% 
     scale_data(logp1_scale = T, 
-               zscore_scale = T) %>%  
-    extract_variable_features(log1p_data = F, 
-                              maxvars = 10000)
+               zscore_scale = T)  
+  # extract_variable_features(log1p_data = F, 
+  #                           maxvars = 10000)
   
   plot_pca <- 
     plot_data_variable %>%
@@ -3268,7 +5337,11 @@ if(file.exists("data/processed/tissue_sample_pca.rds")) {
   
   plot_pca %>% 
     saveRDS("data/processed/tissue_sample_pca.rds")
+  
+  
 }
+
+
 
 
 plot_pca %>% 
@@ -3376,6 +5449,72 @@ plot <-
 ggsave(savepath("Tissue sample UMAP dataset faceted.pdf"),
        plot = plot,
        width = 8, height = 49)
+
+
+###############################################
+
+
+plot_data <-
+  list(PCA = plot_pca %>% 
+         get_pca_scores(use_R2cum_PCselection = T,
+                        R2cum_lim = 0.8) %>% 
+         as_tibble(rownames = "sample_id"),
+       UMAP = plot_umap) %>% 
+  map(. %>% select(sample_id = 1,
+                   V1 = 2, V2 = 3)) %>% 
+  bind_rows(.id = "type") %>%
+  
+  left_join(plot_data_meta,
+            by = c("sample_id" = "internal_sample_id")) %>% 
+  select(1:6) %>% 
+  gather(component, value, V1, V2) %>% 
+  group_by(type, component) %>% 
+  mutate(value = value - ((max(value) + min(value)) / 2)) %>% 
+  group_by(type) %>% 
+  mutate(value = scales::rescale(value, to = c(-1, 1))) %>% 
+  ungroup() %>% 
+  spread(component, value) 
+
+
+plot <-
+  plot_data %>% 
+  ggplot(aes(V1, V2, color = region)) +
+  geom_point(show.legend = F,
+             size = 0.1,
+             shape = 16) +
+  facet_grid( ~ type) +
+  coord_fixed() +
+  scale_color_manual(values = region_palette) +
+  # theme_void() +
+  theme(panel.border = element_rect(fill = NA,
+                                    color = "gray70"),
+        axis.ticks = element_blank(),
+        axis.text = element_blank(),
+        panel.grid = element_blank(),
+        panel.background = element_blank(),
+        strip.background = element_blank(),
+        strip.text.y = element_text(angle = -90)) +
+  labs(x = "Component 1",
+       y = "Component 2")
+ggsave(savepath("tissue sample PCA UMAP combo.pdf"),
+       plot = plot,
+       width = 9, height = 4.5)
+
+
+plot + 
+  geom_text_repel(data = . %>%
+                    group_by(type, region) %>%
+                    summarise(V1 = mean(V1),
+                              V2 = mean(V2)),
+                  aes(label = region),
+                  color = "black",
+                  size = 2,
+                  max.overlaps = 15,
+                  box.padding = 0.05,
+                  show.legend = F) 
+
+ggsave(savepath("tissue sample PCA UMAP combo labeled.pdf"),
+       width = 9, height = 4.5)
 
 ```
 
@@ -3635,188 +5774,136 @@ plot %>%
 
 ```{r}
 
-gene_classification
+# Pies
 
-```
-
-
-## Tau vs specificity
-```{r}
-p1 <-
-  gene_classification %>% 
-  left_join(gene_consensus_tau,
-            by = c("dataset_id", "ensg_id" = "gene")) %>% 
-  mutate(specificity_category = factor(specificity_category, 
-                                       spec_category_levels)) %>% 
-  arrange(desc(dataset_id)) %>% 
-  mutate(dataset_id = factor(dataset_id, unique(dataset_id))) %>% 
-  ggplot(aes(tau_score, specificity_category, fill = specificity_category)) +
-  geom_violin(scale = "width", 
-              show.legend = F) +
-  facet_wrap(~dataset_id, ncol = 1, strip.position = "left") +
-  scale_fill_manual(values = spec_category_pal) +
-  scale_x_continuous(limits = c(0, 1),
-                     breaks = c(0, 0.5, 1),
-                     expand = expansion(0)) +
-  # coord_fixed(1/5) +
-  theme_bw() +
-  theme(axis.text.y = element_blank(),
-        axis.ticks.y = element_blank(),
-        axis.title.y = element_blank(),
-        axis.line.x = element_line(),
-        panel.border = element_blank()) +
-  labs(x = "Tau Score")
-
-p2 <- 
-  gene_classification %>% 
+gene_classification %>%
+  mutate(dataset_id = factor(dataset_id, plot_datasets),
+         specificity_category = factor(specificity_category, spec_category_levels)) %>% 
   group_by(dataset_id, specificity_category) %>% 
   count() %>% 
-  ungroup() %>% 
-  mutate(specificity_category = factor(specificity_category, 
-                                       spec_category_levels)) %>% 
-  arrange(desc(dataset_id)) %>% 
-  mutate(dataset_id = factor(dataset_id, unique(dataset_id))) %>% 
-  
-  ggplot(aes(n, specificity_category, fill = specificity_category,
-             label = n)) +
-  geom_col() +
-  geom_text(hjust = 0,
-            vjust = 0.5) +
-  facet_wrap(~dataset_id, ncol = 1, strip.position = "left") +
-  scale_fill_manual(values = spec_category_pal) +
-  scale_x_continuous(limits = c(0, 20000),
-                     breaks = c(0, 10000, 20000),
-                     expand = expansion(0)) +
-  theme_bw() +
-  theme(axis.text.y = element_blank(),
-        axis.ticks.y = element_blank(),
-        axis.title.y = element_blank(),
-        axis.line.x = element_line(),
-        panel.border = element_blank(), 
-        strip.background = element_blank(),
-        strip.text = element_blank()) +
-  labs(x = "Number of genes")
-
-p1 + p2
-ggsave(savepath("Specificity bar tau.pdf"),
-       width = 6, height = 10)
+  ggplot(aes(1, n, label = n, fill = specificity_category)) + 
+  geom_col(show.legend = F) +
+  geom_textpath(position = position_stack(vjust = 0.5), 
+                aes(x = 1.5),
+                angle = 90) +
+  facet_wrap(~dataset_id) +
+  scale_fill_manual(values = gene_category_pal) +
+  coord_polar("y") +
+  theme_void()
+ggsave(savepath("specificity pies.pdf"),
+       width = 4, height = 5)
 
 
-p1 <-
+gene_classification %>%
+  mutate(dataset_id = factor(dataset_id, plot_datasets),
+         specificity_category = factor(specificity_category, spec_category_levels)) %>% 
+  group_by(dataset_id, specificity_category) %>% 
+  count() %>% 
+  ggplot(aes(1, n, label = n, fill = specificity_category)) + 
+  geom_col(show.legend = F) +
+  geom_textpath(position = position_stack(vjust = 0.5), 
+                hjust = 1,
+                aes(x = 1.5)) +
+  facet_wrap(~dataset_id) +
+  scale_fill_manual(values = gene_category_pal) +
+  scale_x_discrete(expand = expansion(c(0,1)))+
+  coord_polar("y") +
+  theme_void()
+ggsave(savepath("specificity pies2.pdf"),
+       width = 4, height = 5)
+
+# Network
+plot_data <-
   gene_classification %>%
-  filter(dataset_id == "singlecell") %>% 
-  left_join(gene_consensus_tau,
-            by = c("dataset_id", "ensg_id" = "gene")) %>% 
-  mutate(specificity_category = factor(specificity_category, 
-                                       spec_category_levels)) %>% 
-  arrange(desc(dataset_id)) %>% 
-  mutate(dataset_id = factor(dataset_id, unique(dataset_id))) %>% 
-  ggplot(aes(tau_score, specificity_category, fill = specificity_category)) +
-  geom_violin(scale = "width", 
-              show.legend = F) +
-  facet_wrap(~dataset_id, ncol = 1, strip.position = "left") +
-  scale_fill_manual(values = spec_category_pal) +
-  scale_x_continuous(limits = c(0, 1),
-                     breaks = c(0, 0.5, 1),
-                     expand = expansion(0)) +
-  # coord_fixed(1/5) +
-  theme_bw() +
-  theme(axis.text.y = element_blank(),
-        axis.ticks.y = element_blank(),
-        axis.title.y = element_blank(),
-        axis.line.x = element_line(),
-        panel.border = element_blank()) +
-  labs(x = "Tau Score")
-
-p2 <- 
-  gene_classification %>% 
-  filter(dataset_id == "singlecell") %>% 
-  group_by(dataset_id, specificity_category) %>% 
+  mutate(dataset_id = factor(dataset_id, plot_datasets),
+         specificity_category = factor(specificity_category, spec_category_levels),
+         enhanced_tissues = str_replace_all(enhanced_tissues, 
+                                            ", ",
+                                            "¤") %>% 
+           str_replace_all(",", ";") %>% 
+           str_replace_all("¤", ", "),
+         group_node = enhanced_tissues) %>% 
+  filter(specificity_category %in% c("Tissue enriched",
+                                     "Group enriched")) %>% 
+  # "Tissue enhanced")) %>% 
+  select(dataset_id, sample = enhanced_tissues, group_node, 
+         specificity_category) %>% 
+  group_by_all() %>% 
   count() %>% 
+  ungroup() %>%
+  separate_rows(sample, sep = ";") %>% 
+  arrange(dataset_id, sample) %>% 
+  filter(n > 2 | specificity_category == "Tissue enriched") %>%
+  group_by(dataset_id, sample, specificity_category) %>% 
+  mutate(edge_rank = rank(-n, ties.method = "min")) %>% 
+  # filter(sample == "brain") %>% 
+  group_by(dataset_id, group_node) %>% 
+  mutate(high_rank = any(edge_rank <= 3)) %>% 
   ungroup() %>% 
-  mutate(specificity_category = factor(specificity_category, 
-                                       spec_category_levels)) %>% 
-  arrange(desc(dataset_id)) %>% 
-  mutate(dataset_id = factor(dataset_id, unique(dataset_id))) %>% 
-  
-  ggplot(aes(n, specificity_category, fill = specificity_category,
-             label = n)) +
-  geom_col() +
-  geom_text(hjust = 0,
-            vjust = 0.5) +
-  facet_wrap(~dataset_id, ncol = 1, strip.position = "left") +
-  scale_fill_manual(values = spec_category_pal) +
-  scale_x_continuous(limits = c(0, 20000),
-                     breaks = c(0, 10000, 20000),
-                     expand = expansion(0)) +
-  theme_bw() +
-  theme(axis.text.y = element_blank(),
-        axis.ticks.y = element_blank(),
-        axis.title.y = element_blank(),
-        axis.line.x = element_line(),
-        panel.border = element_blank(), 
-        strip.background = element_blank(),
-        strip.text = element_blank()) +
-  labs(x = "Number of genes")
+  filter(high_rank) %>% 
+  unite(group_node, group_node, specificity_category, n, remove = F) 
 
-p1 + p2
-ggsave(savepath("Specificity bar tau sc only.pdf"),
-       width = 6, height = 3)
-ggsave(savepath("Specificity bar tau sc only.png"),
-       width = 6, height = 3)
+plots <- 
+  plot_data$dataset_id %>%
+  unique() %>% 
+  lapply(function(dataset_id_) {
+    plot_data %>% 
+      filter(dataset_id == dataset_id_) %>% 
+      select(sample, group_node) %>% 
+      as_tbl_graph(directed = F) %>%
+      left_join(as_tibble(.) %>% 
+                  separate(name, 
+                           into = c("node_name", "node_type", "n"),
+                           sep = "_", remove = F)) %>% 
+      mutate(node_type = ifelse(is.na(node_type),
+                                "sample", 
+                                node_type),
+             node_color = ifelse(node_type == "sample",
+                                 name, 
+                                 node_type),
+             n = as.numeric(n)) %>% 
+      ggraph(layout = "nicely") +
+      geom_edge_link() +
+      geom_node_point(data = . %>% 
+                        filter(node_type == "sample"),
+                      aes(color = node_color),
+                      show.legend = F,
+                      size = 6) +
+      geom_node_point(data = . %>% 
+                        filter(node_type != "sample"),
+                      aes(color = node_color,
+                          size = sqrt(n)),
+                      show.legend = F) +
+      geom_node_text(data = . %>% 
+                       filter(node_type == "sample"),
+                     aes(label = str_wrap(name, width = 10)),
+                     lineheight = 0.8,
+                     size = 2) +
+      geom_node_text(data = . %>% 
+                       filter(node_type != "sample"),
+                     aes(label = n),
+                     color = "white",
+                     size = 2) +
+      scale_color_manual(values = c(consensus_palette, gene_category_pal)) +
+      scale_size_continuous(range = c(0, 10),
+                            limit = c(0, max(sqrt(plot_data$n)))) +
+      ggtitle(dataset_id_) +
+      coord_fixed() +
+      theme_void()
+  })
 
-
+plots %>% 
+  wrap_plots()
+ggsave(savepath("Classification networks.pdf"),
+       width = 16, height = 16)
+ggsave(savepath("Classification networks.png"),
+       width = 16, height = 16,
+       dpi = 300)
+pdf(savepath("Classification networks separately.pdf"), 
+    width = 8, height = 8)
+plots
+dev.off()
 ```
-
-## Tau vs Expression
-
-```{r}
-consensus_maxexp <- 
-  consensus_data %>% 
-  map(. %>% column_to_rownames("ensg_id") %>% 
-        apply(MARGIN = 1, 
-              max) %>% 
-        enframe("gene", "max_exp")) %>% 
-  bind_rows(.id = "dataset_id")
-
-
-gene_consensus_tau %>% 
-  left_join(consensus_maxexp) %>% 
-  ggplot(aes(tau_score,
-             log10(max_exp + 1))) +
-  geom_hex(aes(alpha = stat(count)),
-           fill = "orangered",
-           bins = 50) +
-  scale_alpha_continuous(range = c(0, 1)) +
-  scale_fill_viridis() +
-  facet_grid( ~ dataset_id) +
-  # facet_wrap(~dataset_id) +
-  theme_bw()
-ggsave(savepath("tau vs exp.pdf"),
-       width = 8, height = 2.5)
-
-gene_consensus_tau %>% 
-  left_join(consensus_maxexp) %>% 
-  left_join(gene_classification,
-            by = c("gene" = "ensg_id", "dataset_id")) %>% 
-  mutate(specificity_category = factor(specificity_category, 
-                                       spec_category_levels)) %>% 
-  ggplot(aes(tau_score,
-             log10(max_exp + 1))) +
-  geom_hex(aes(alpha = stat(count)),
-           fill = "orangered",
-           bins = 50) +
-  scale_alpha_continuous(range = c(0, 1)) +
-  scale_fill_viridis() +
-  facet_grid(specificity_category ~ dataset_id) +
-  # facet_wrap(~dataset_id) +
-  theme_bw()
-ggsave(savepath("tau vs exp per specificity.pdf"),
-       width = 8, height = 7)
-
-
-```
-
 
 ## Classification per tissue
 
@@ -4098,87 +6185,303 @@ ggsave(savepath("Classification barplot sorted.png"),
 
 ####################
 
-plot_data_tau <- 
-  plot_data %>% 
-  filter(specificity_category %in% c("Tissue enriched",
-                                     "Group enriched")) %>%
-  mutate(enhanced_tissues = factor(enhanced_tissues, 
-                                   plot_order),
-         dataset_id = factor(dataset_id,
-                             rev(plot_datasets))) %>% 
-  group_by(dataset_id, enhanced_tissues) %>% 
-  summarise(quantile = c(0.25, 0.5, 0.75),
-            quantil_value = quantile(tau_score, quantile)) %>% 
-  ungroup()
-
-plot_data_tau %>% 
-  ggplot(aes(enhanced_tissues, tau_score, fill = enhanced_tissues)) +
-  geom_crossbar(data = plot_data_tau %>% 
-                  spread(quantile, quantil_value),
-                aes(ymin = `0.25`,
-                    y = `0.5`,
-                    ymax = `0.75`),
-                show.legend = F) +
-  # geom_boxplot(show.legend = F, 
-  #              outlier.colour = NA, 
-  #              coef = 0) +
-  
-  ylab("Tau IQR") +
-  facet_grid(~ dataset_id, 
-             space = "free",
-             scales = "free_x") +
-  scale_y_continuous(limits = c(0.7, 1),
-                     expand = expansion(0)) + 
-  scale_x_discrete(expand = expansion(0), position = "top") +
-  scale_fill_manual(values = consensus_palette) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = -90, hjust = 1), 
-        strip.placement = "outside",
-        legend.position = c(0.7, 0.5),
-        axis.title.x = element_blank(),
-        panel.border = element_blank())
-
-ggsave(savepath("Tau crossbar.pdf"),
-       width = 24, height = 6)
-
-
-plot_data_tau %>% 
-  spread(quantile, quantil_value) %>% 
-  arrange(-`0.5`) %>% 
-  mutate(enhanced_tissues = factor(enhanced_tissues, enhanced_tissues)) %>% 
-  ggplot(aes(enhanced_tissues, 
-             ymin = `0.25`,
-             y = `0.5`,
-             ymax = `0.75`, 
-             fill = enhanced_tissues)) +
-  geom_crossbar(data = ,
-                aes(),
-                show.legend = F) +
-  ylab("Tau IQR") +
-  facet_grid(~ dataset_id, 
-             space = "free",
-             scales = "free_x") +
-  scale_y_continuous(limits = c(0.7, 1),
-                     expand = expansion(0)) + 
-  scale_x_discrete(expand = expansion(0), position = "top") +
-  scale_fill_manual(values = consensus_palette) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = -90, hjust = 1), 
-        strip.placement = "outside",
-        legend.position = c(0.7, 0.5),
-        axis.title.x = element_blank(),
-        panel.border = element_blank())
-
-ggsave(savepath("Tau crossbar ordered.pdf"),
-       width = 24, height = 6)
+# plot_data_tau <- 
+#   plot_data %>% 
+#   filter(specificity_category %in% c("Tissue enriched",
+#                                      "Group enriched")) %>%
+#   mutate(enhanced_tissues = factor(enhanced_tissues, 
+#                                    plot_order),
+#          dataset_id = factor(dataset_id,
+#                              rev(plot_datasets))) %>% 
+#   group_by(dataset_id, enhanced_tissues) %>% 
+#   summarise(quantile = c(0.25, 0.5, 0.75),
+#             quantil_value = quantile(tau_score, quantile)) %>% 
+#   ungroup()
+# 
+# plot_data_tau %>% 
+#   ggplot(aes(enhanced_tissues, tau_score, fill = enhanced_tissues)) +
+#   geom_crossbar(data = plot_data_tau %>% 
+#                   spread(quantile, quantil_value),
+#                 aes(ymin = `0.25`,
+#                     y = `0.5`,
+#                     ymax = `0.75`),
+#                 show.legend = F) +
+#   # geom_boxplot(show.legend = F, 
+#   #              outlier.colour = NA, 
+#   #              coef = 0) +
+#   
+#   ylab("Tau IQR") +
+#   facet_grid(~ dataset_id, 
+#              space = "free",
+#              scales = "free_x") +
+#   scale_y_continuous(limits = c(0.7, 1),
+#                      expand = expansion(0)) + 
+#   scale_x_discrete(expand = expansion(0), position = "top") +
+#   scale_fill_manual(values = consensus_palette) +
+#   theme_bw() +
+#   theme(axis.text.x = element_text(angle = -90, hjust = 1), 
+#         strip.placement = "outside",
+#         legend.position = c(0.7, 0.5),
+#         axis.title.x = element_blank(),
+#         panel.border = element_blank())
+# 
+# ggsave(savepath("Tau crossbar.pdf"),
+#        width = 24, height = 6)
+# 
+# 
+# plot_data_tau %>% 
+#   spread(quantile, quantil_value) %>% 
+#   arrange(-`0.5`) %>% 
+#   mutate(enhanced_tissues = factor(enhanced_tissues, enhanced_tissues)) %>% 
+#   ggplot(aes(enhanced_tissues, 
+#              ymin = `0.25`,
+#              y = `0.5`,
+#              ymax = `0.75`, 
+#              fill = enhanced_tissues)) +
+#   geom_crossbar(data = ,
+#                 aes(),
+#                 show.legend = F) +
+#   ylab("Tau IQR") +
+#   facet_grid(~ dataset_id, 
+#              space = "free",
+#              scales = "free_x") +
+#   scale_y_continuous(limits = c(0.7, 1),
+#                      expand = expansion(0)) + 
+#   scale_x_discrete(expand = expansion(0), position = "top") +
+#   scale_fill_manual(values = consensus_palette) +
+#   theme_bw() +
+#   theme(axis.text.x = element_text(angle = -90, hjust = 1), 
+#         strip.placement = "outside",
+#         legend.position = c(0.7, 0.5),
+#         axis.title.x = element_blank(),
+#         panel.border = element_blank())
+# 
+# ggsave(savepath("Tau crossbar ordered.pdf"),
+#        width = 24, height = 6)
 ```
+
+
+## Tau vs specificity
+```{r}
+
+gene_classification %>% 
+  filter(dataset_id == "singlecell") %>% 
+  left_join(gene_consensus_tau,
+            by = c("dataset_id", "ensg_id" = "gene")) %>% 
+  group_by(dataset_id, specificity_category) %>% 
+  summarise(mean_tau = median(tau_score),
+            sd_tau = sd(tau_score))
+
+gene_consensus_tau %>% 
+  
+  filter(dataset_id == "singlecell") %>% 
+  pull(tau_score) %>% 
+  range(na.rm = T)
+
+gene_classification %>% 
+  left_join(gene_consensus_tau,
+            by = c("dataset_id", "ensg_id" = "gene")) %>% 
+  mutate(spec_n = case_when(specificity_category == "Tissue enriched" ~ 4,
+                            specificity_category == "Group enriched" ~ 3,
+                            specificity_category == "Tissue enhanced" ~ 2,
+                            specificity_category == "Low tissue specificity" ~ 1)) %>% 
+  filter(!is.na(tau_score)) %>% 
+  arrange(specificity_category) %>% 
+  group_by(dataset_id) %>%
+  summarise(spearcor = cor(tau_score, spec_n, method = "spearman"),
+            polycor = polycor::polyserial(tau_score, as.character(spec_n),
+                                          ML = T))
+# ggplot(aes(spec_n, tau_score)) +
+# geom_jitter()
+
+# polycor::polyserial(a$tau_score, a$specificity_category)
+p1 <-
+  gene_classification %>% 
+  left_join(gene_consensus_tau,
+            by = c("dataset_id", "ensg_id" = "gene")) %>% 
+  mutate(specificity_category = factor(specificity_category, 
+                                       spec_category_levels)) %>% 
+  arrange(desc(dataset_id)) %>% 
+  mutate(dataset_id = factor(dataset_id, unique(dataset_id))) %>% 
+  ggplot(aes(tau_score, specificity_category, fill = specificity_category)) +
+  geom_violin(scale = "width", 
+              show.legend = F) +
+  facet_wrap(~dataset_id, ncol = 1, strip.position = "left") +
+  scale_fill_manual(values = spec_category_pal) +
+  scale_x_continuous(limits = c(0, 1),
+                     breaks = c(0, 0.5, 1),
+                     expand = expansion(0)) +
+  # coord_fixed(1/5) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.line.x = element_line(),
+        panel.border = element_blank()) +
+  labs(x = "Tau Score")
+
+p2 <- 
+  gene_classification %>% 
+  group_by(dataset_id, specificity_category) %>% 
+  count() %>% 
+  ungroup() %>% 
+  mutate(specificity_category = factor(specificity_category, 
+                                       spec_category_levels)) %>% 
+  arrange(desc(dataset_id)) %>% 
+  mutate(dataset_id = factor(dataset_id, unique(dataset_id))) %>% 
+  
+  ggplot(aes(n, specificity_category, fill = specificity_category,
+             label = n)) +
+  geom_col() +
+  geom_text(hjust = 0,
+            size = 3,
+            vjust = 0.5) +
+  facet_wrap(~dataset_id, ncol = 1, strip.position = "left") +
+  scale_fill_manual(values = spec_category_pal) +
+  scale_x_continuous(limits = c(0, 20000),
+                     breaks = c(0, 10000, 20000),
+                     expand = expansion(0)) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.line.x = element_line(),
+        panel.border = element_blank(), 
+        strip.background = element_blank(),
+        strip.text = element_blank()) +
+  labs(x = "Number of genes")
+
+p1 + p2
+ggsave(savepath("Specificity bar tau.pdf"),
+       width = 6, height = 10)
+ggsave(savepath("Specificity bar tau thin.pdf"),
+       width = 6, height = 5)
+
+
+p1 <-
+  gene_classification %>%
+  filter(dataset_id == "singlecell") %>% 
+  left_join(gene_consensus_tau,
+            by = c("dataset_id", "ensg_id" = "gene")) %>% 
+  mutate(specificity_category = factor(specificity_category, 
+                                       spec_category_levels)) %>% 
+  arrange(desc(dataset_id)) %>% 
+  mutate(dataset_id = factor(dataset_id, unique(dataset_id))) %>% 
+  ggplot(aes(tau_score, specificity_category, fill = specificity_category)) +
+  geom_violin(scale = "width", 
+              show.legend = F) +
+  facet_wrap(~dataset_id, ncol = 1, strip.position = "left") +
+  scale_fill_manual(values = spec_category_pal) +
+  scale_x_continuous(limits = c(0, 1),
+                     breaks = c(0, 0.5, 1),
+                     expand = expansion(0)) +
+  # coord_fixed(1/5) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.line.x = element_line(),
+        panel.border = element_blank()) +
+  labs(x = "Tau Score")
+
+p2 <- 
+  gene_classification %>% 
+  filter(dataset_id == "singlecell") %>% 
+  group_by(dataset_id, specificity_category) %>% 
+  count() %>% 
+  ungroup() %>% 
+  mutate(specificity_category = factor(specificity_category, 
+                                       spec_category_levels)) %>% 
+  arrange(desc(dataset_id)) %>% 
+  mutate(dataset_id = factor(dataset_id, unique(dataset_id))) %>% 
+  
+  ggplot(aes(n, specificity_category, fill = specificity_category,
+             label = n)) +
+  geom_col() +
+  geom_text(hjust = 0,
+            vjust = 0.5) +
+  facet_wrap(~dataset_id, ncol = 1, strip.position = "left") +
+  scale_fill_manual(values = spec_category_pal) +
+  scale_x_continuous(limits = c(0, 20000),
+                     breaks = c(0, 10000, 20000),
+                     expand = expansion(0)) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.line.x = element_line(),
+        panel.border = element_blank(), 
+        strip.background = element_blank(),
+        strip.text = element_blank()) +
+  labs(x = "Number of genes")
+
+p1 + p2
+ggsave(savepath("Specificity bar tau sc only.pdf"),
+       width = 6, height = 3)
+ggsave(savepath("Specificity bar tau sc only.png"),
+       width = 6, height = 3)
+
+
+```
+
+## Tau vs Expression
+
+```{r}
+consensus_maxexp <- 
+  consensus_data %>% 
+  map(. %>% column_to_rownames("ensg_id") %>% 
+        apply(MARGIN = 1, 
+              max) %>% 
+        enframe("gene", "max_exp")) %>% 
+  bind_rows(.id = "dataset_id")
+
+
+gene_consensus_tau %>% 
+  left_join(consensus_maxexp) %>% 
+  ggplot(aes(tau_score,
+             log10(max_exp + 1))) +
+  geom_hex(aes(alpha = stat(count)),
+           fill = "orangered",
+           bins = 50) +
+  scale_alpha_continuous(range = c(0, 1)) +
+  scale_fill_viridis() +
+  facet_grid( ~ dataset_id) +
+  # facet_wrap(~dataset_id) +
+  theme_bw()
+ggsave(savepath("tau vs exp.pdf"),
+       width = 8, height = 2.5)
+
+gene_consensus_tau %>% 
+  left_join(consensus_maxexp) %>% 
+  left_join(gene_classification,
+            by = c("gene" = "ensg_id", "dataset_id")) %>% 
+  mutate(specificity_category = factor(specificity_category, 
+                                       spec_category_levels)) %>% 
+  ggplot(aes(tau_score,
+             log10(max_exp + 1))) +
+  geom_hex(aes(alpha = stat(count)),
+           fill = "orangered",
+           bins = 50) +
+  scale_alpha_continuous(range = c(0, 1)) +
+  scale_fill_viridis() +
+  facet_grid(specificity_category ~ dataset_id) +
+  # facet_wrap(~dataset_id) +
+  theme_bw()
+ggsave(savepath("tau vs exp per specificity.pdf"),
+       width = 8, height = 7)
+
+
+```
+
+
 
 
 ## Compare tau between datasets
 
 ```{r}
 
-gene_classification %>%
+plot_data <- 
+  gene_classification %>%
   
   select(ensg_id, dataset_id1 = dataset_id, 
          specificity_category1 = specificity_category) %>% 
@@ -4197,15 +6500,19 @@ gene_classification %>%
             suffix = c("1", "2")) %>% 
   
   mutate(dataset_id1 = factor(dataset_id1, rev(plot_datasets)),
-         dataset_id2 = factor(dataset_id2, rev(plot_datasets))) %>% 
+         dataset_id2 = factor(dataset_id2, rev(plot_datasets))) 
+
+plot_data %>% 
   
   ggplot(aes(tau_score1, tau_score2)) +
   # geom_point_rast() +
-  geom_hex(aes(fill = stat(log10(count))),
-           bins = 25) +
+  geom_hex(aes(alpha = stat(log10(count))),
+           bins = 25,
+           fill = "orangered") +
   geom_text(data = . %>% 
               group_by(dataset_id1, dataset_id2) %>% 
-              summarise(cor = cor(tau_score1, tau_score2, method = "spearman")),
+              summarise(cor = cor(tau_score1, tau_score2, method = "spearman",
+                                  use = "pairwise.complete.obs")),
             aes(0, 0, label = round(cor, 2), 
                 size = cor),
             hjust = 0,
@@ -4218,12 +6525,39 @@ gene_classification %>%
   scale_y_continuous(limits = c(0, 1),
                      expand = expansion(0),
                      breaks = c(0, 0.5, 1)) +
+  scale_alpha_continuous(range = 0:1,) +
   facet_grid(dataset_id2 ~ dataset_id1) +
   coord_fixed() +
   theme_bw() + 
   theme(panel.spacing = unit(1, "mm")) +
   ggtitle("Spearman correlation of tau for expressed genes")
 ggsave(savepath("Tau correlation.pdf"),
+       width = 8, height = 6)
+
+
+plot_data2 <- 
+  plot_data %>% 
+  mutate(lvl1 = tau_score1<0.90,
+         lvl2 = tau_score2<0.90) %>% 
+  group_by(dataset_id1, dataset_id2, lvl1, lvl2) %>% 
+  count() %>% 
+  group_by(dataset_id1, dataset_id2, lvl1) %>% 
+  mutate(frac = n / sum(n)) 
+
+plot_data2  %>% 
+  filter(dataset_id1 == "singlecell",
+         dataset_id2 == "tissue")
+
+plot_data2 %>% 
+  ggplot(aes(lvl1, lvl2, alpha = frac))+
+  geom_tile(fill = "orangered") +
+  geom_text(aes(label = round(frac, 2)),
+            alpha = 1) + 
+  facet_grid(dataset_id2 ~ dataset_id1) +
+  theme_bw() +
+  coord_fixed() +
+  scale_alpha_continuous(range = 0:1)
+ggsave(savepath("Tau correlation binary.pdf"),
        width = 8, height = 6)
 
 ```
@@ -4335,8 +6669,8 @@ ggsave(savepath("Spec allivial.pdf"),
 
 ORA_data <- 
   gene_classification_long %>% 
-  filter(specificity_category %in% c("Tissue enhanced", 
-                                     "Group enhanced"))
+  filter(specificity_category %in% c("Tissue enriched", 
+                                     "Group enriched"))
 
 ORA_settings <- 
   expand_grid(dataset_id = plot_datasets,
@@ -4370,18 +6704,34 @@ spec_ORA_res <-
     perform_ORA(gene_associations, 
                 database,
                 universe,
-                n_clusters = 5)
+                n_clusters = 1,
+                minGSSize = 2,
+                maxGSSize = Inf,
+                pvalueCutoff = 1,
+                qvalueCutoff = 1)
   }) %>% 
   ungroup()
 
-plot_data <- 
+spec_ORA_res_filt <-
   spec_ORA_res %>% 
   mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
            as.numeric(gsub(".*\\/", "", GeneRatio)),
          BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
            as.numeric(gsub(".*\\/", "", BgRatio)),
-         odds_ratio = GeneFrac / BgFrac)   %>% 
-  filter(odds_ratio > 2)
+         odds_ratio = GeneFrac / BgFrac) %>%   
+  filter(odds_ratio > 2,
+         p.adjust < 0.05,
+         qvalue < 0.05, 
+         Count >= 3)
+
+write_csv(spec_ORA_res_filt, savepath("classification ORA res.csv"))
+
+# spec_ORA_res_filt %>% 
+#   arrange(-odds_ratio) %>% 
+#   View
+
+plot_data <- 
+  spec_ORA_res_filt
 
 plot_order <- 
   plot_data %>% 
@@ -4407,8 +6757,9 @@ plot_data_ordered <-
 
 # p1 <- 
 plot_data_ordered %>% 
-  ggplot(aes(ID, partition, size = odds_ratio,
-             color = odds_ratio)) +
+  ggplot(aes(ID, partition, 
+             size = log2(odds_ratio),
+             color = log2(odds_ratio))) +
   geom_point() +
   geom_tile(data = . %>% 
               select(partition) %>% 
@@ -4428,7 +6779,7 @@ plot_data_ordered %>%
              space = "free",
              scales = "free_x") +
   scale_color_gradient(high = "orangered", 
-                      low = "lightgray") +
+                       low = "lightgray") +
   scale_fill_manual(values = consensus_palette) +
   scale_size_continuous(range = c(0.5,4)) +
   labs(y = "Single cell type",
@@ -4443,6 +6794,152 @@ plot_data_ordered %>%
 ggsave(savepath("Spec-spec ORA bubble singlecell.pdf"),
        width = 16, height = 12)
 
+
+plots <- 
+  plot_data %>% 
+  filter(dataset_id == "singlecell") %>% 
+  pull(db_dataset_id) %>% 
+  unique() %>% 
+  lapply(function(db_ds) {
+    
+    plot_order <- 
+      plot_data %>% 
+      filter(dataset_id == "singlecell" & 
+               db_dataset_id == db_ds) %>% 
+      select(partition, ID, odds_ratio) %>% 
+      spread(ID, odds_ratio, fill = 0) %>% 
+      column_to_rownames("partition") %>% 
+      cluster_wide_data(distance_method = "binary",
+                        clustering_method = "ward.D2", 
+                        cluster_rows = T,
+                        cluster_cols = T) %>% 
+      {list(partition = rownames(.),
+            ID = colnames(.))}
+    
+    plot_data_ordered <- 
+      plot_data %>% 
+      filter(dataset_id == "singlecell" & 
+               db_dataset_id == db_ds) %>% 
+      mutate(partition = factor(partition, plot_order$partition),
+             ID = factor(ID, plot_order$ID),
+             dataset_id = factor(dataset_id, rev(plot_datasets)),
+             db_dataset_id = factor(db_dataset_id, rev(plot_datasets))) %>% 
+      arrange(odds_ratio) %>% 
+      filter(dataset_id == "singlecell")
+    
+    
+    # p1 <- 
+    plot_data_ordered %>% 
+      ggplot(aes(ID, partition, size = odds_ratio,
+                 color = odds_ratio)) +
+      geom_point() +
+      geom_tile(data = . %>% 
+                  select(partition) %>% 
+                  distinct(),
+                aes(0, partition, fill = partition),
+                show.legend = F,
+                inherit.aes = F,
+                color = "black")  +
+      geom_tile(data = . %>% 
+                  select(ID, db_dataset_id) %>% 
+                  distinct(),
+                aes(ID, 0, fill = ID),
+                show.legend = F,
+                inherit.aes = F,
+                color = "black")  +
+      scale_color_gradient(high = "orangered", 
+                           low = "lightgray") +
+      scale_fill_manual(values = consensus_palette) +
+      scale_size_continuous(range = c(0.5,4)) +
+      labs(y = "Single cell type",
+           x = "Tissue/Cell specificity",
+           title = db_ds) +
+      coord_fixed() +
+      theme_bw() +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1, 
+                                       vjust = 0.5))
+  })
+
+pdf(savepath("Spec-spec ORA bubble singlecell sep.pdf"),
+    width = 9, height = 11)
+plots    
+dev.off()
+
+
+plots <- 
+  plot_data %>% 
+  filter(dataset_id == "singlecell") %>% 
+  pull(db_dataset_id) %>% 
+  unique() %>% 
+  lapply(function(db_ds) {
+    
+    plot_order <- 
+      plot_data %>% 
+      filter(dataset_id == "singlecell" & 
+               db_dataset_id == db_ds) %>% 
+      select(partition, ID, odds_ratio) %>% 
+      spread(ID, odds_ratio, fill = 0) %>% 
+      column_to_rownames("partition") %>% 
+      cluster_wide_data(distance_method = "binary",
+                        clustering_method = "ward.D2", 
+                        cluster_rows = T,
+                        cluster_cols = T) %>% 
+      {list(partition = rownames(.),
+            ID = colnames(.))}
+    
+    plot_data_ordered <- 
+      plot_data %>% 
+      filter(dataset_id == "singlecell" & 
+               db_dataset_id == db_ds) %>% 
+      mutate(partition = factor(partition, plot_order$partition),
+             ID = factor(ID, plot_order$ID),
+             dataset_id = factor(dataset_id, rev(plot_datasets)),
+             db_dataset_id = factor(db_dataset_id, rev(plot_datasets))) %>% 
+      arrange(odds_ratio) %>% 
+      filter(dataset_id == "singlecell")
+    
+    
+    # p1 <- 
+    plot_data_ordered %>% 
+      ggplot(aes(partition, ID, 
+                 size = log2(odds_ratio),
+                 color = log2(odds_ratio))) +
+      geom_point() +
+      geom_tile(data = . %>% 
+                  select(partition) %>% 
+                  distinct(),
+                aes(partition, 0, fill = partition),
+                show.legend = F,
+                inherit.aes = F,
+                color = "black")  +
+      geom_tile(data = . %>% 
+                  select(ID, db_dataset_id) %>% 
+                  distinct(),
+                aes(0, ID, fill = ID),
+                show.legend = F,
+                inherit.aes = F,
+                color = "black")  +
+      scale_color_gradient(high = "orangered", 
+                           low = "lightgray",
+                           limits = c(1, max(log2(plot_data$odds_ratio))),
+                           breaks = 1:6) +
+      scale_fill_manual(values = consensus_palette) +
+      scale_size_continuous(range = c(1,4),
+                            limits = c(1, max(log2(plot_data$odds_ratio))),
+                            breaks = 1:6) +
+      labs(x = "Single cell type",
+           y = "Tissue/Cell specificity",
+           title = db_ds) +
+      coord_fixed() +
+      theme_bw() +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1, 
+                                       vjust = 0.5))
+  })
+
+pdf(savepath("Spec-spec ORA bubble singlecell sep flip.pdf"),
+    width = 11, height = 9)
+plots    
+dev.off()
 
 plot_data_ordered_all <- 
   plot_data %>% 
@@ -4482,7 +6979,7 @@ plot_data_ordered_all %>%
              space = "free",
              scales = "free") +
   scale_color_gradient(high = "orangered", 
-                      low = "lightgray") +
+                       low = "lightgray") +
   scale_fill_manual(values = consensus_palette) +
   scale_size_continuous(range = c(0.5,4)) +
   labs(y = "Tissue/Cell type",
@@ -4549,6 +7046,131 @@ ggsave(savepath("Spec-spec ORA bubble all.pdf"),
 #   theme_void()
 # 
 # (p1_ybar | p1) / (p1_blank | p1_xbar)
+
+plot_names <- 
+  consensus_data %>% 
+  map(. %>% 
+        select(-1) %>% 
+        names() %>% 
+        enframe("i", "name")
+  ) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  select(-i)
+
+ORA_net <- 
+  spec_ORA_res_filt %>%
+  filter(dataset_id %in% c("singlecell"),
+         db_dataset_id %in% c("tissue")) %>% 
+  # filter(odds_ratio > 4) %>% 
+  select(item1 = partition, item2 = ID, 
+         p = p.adjust, odds = odds_ratio) %>% 
+  as_tbl_graph() %>% 
+  left_join(plot_names) 
+
+ORA_net %>% 
+  ggraph(layout = "nicely") +
+  geom_edge_parallel(sep = unit(0.8, "mm")) + 
+  geom_node_point(aes(shape = dataset_id,
+                      color = name),
+                  show.legend = F,
+                  size = 6) +
+  geom_node_text(aes(label = str_wrap(name, 10)),
+                 size = 2, lineheight = 0.8) +
+  scale_color_manual(values = consensus_palette) +
+  theme_void()+
+  coord_fixed()
+ggsave(savepath("class ORA network.pdf"),
+       width = 6, height = 6)
+
+ORA_net %>% 
+  as_tibble() %>% 
+  mutate(x = unclass(factor(dataset_id))) %>% 
+  group_by(dataset_id) %>% 
+  mutate(y = factor(name, plot_order) %>% 
+           unclass(),
+         y = y - min(y),
+         y = scales::rescale(y, 0:1)) %>% 
+  with(create_layout(ORA_net, 
+                     layout = "manual",
+                     x = x,
+                     y = y)) %>% 
+  ggraph()+
+  geom_edge_link(sep = unit(0.8, "mm")) + 
+  geom_node_point(aes(shape = dataset_id,
+                      color = name),
+                  show.legend = F,
+                  size = 6) +
+  geom_node_text(aes(label = str_wrap(name, 10)),
+                 size = 2, lineheight = 0.8) +
+  scale_color_manual(values = consensus_palette) +
+  theme_void() 
+######
+
+ORA_data_bindist <- 
+  ORA_data %>%
+  unite(sample, dataset_id, enhanced_tissues, sep = ";") %>% 
+  select(sample, ensg_id) %>% 
+  mutate(i = 1) %>% 
+  widyr::pairwise_dist(sample, ensg_id, i, method = "binary")
+
+
+plot_order <- 
+  consensus_clust_labelorder$cor_average %>% 
+  unlist() %>% 
+  unique() 
+
+ORA_data_bindist %>%
+  separate(item1, into = c("ds1", "sample1"), sep = ";") %>% 
+  separate(item2, into = c("ds2", "sample2"), sep = ";") %>% 
+  filter(ds1 == "singlecell",
+         ds2 == "tissue") %>% 
+  mutate(sample1 = factor(sample1, plot_order),
+         sample2 = factor(sample2, plot_order)) %>% 
+  ggplot(aes(sample1, sample2, fill = 1 - distance)) +
+  geom_tile()
+
+ORA_data_bindist %>%
+  separate(item1, into = c("ds1", "sample1"), sep = ";") %>% 
+  separate(item2, into = c("ds2", "sample2"), sep = ";") %>% 
+  filter(ds2 == "singlecell",
+         ds1 == "tissue") %>% 
+  arrange(distance)
+
+ORA_data_bindist %>% 
+  filter(grepl("dipose", item1),
+         grepl("dipo", item2))
+
+ORA_data_bindist %>% 
+  filter(distance < 0.95) %>% 
+  ggplot(aes(distance)) +
+  geom_density()
+
+
+ORA_data_bindist %>% 
+  filter(distance < 0.95,
+         substr(item1, 1, 5) != substr(item2, 1, 5)) %>% 
+  as_tbl_graph() %>% 
+  mutate(dataset = str_extract(name, ".*;") %>% 
+           str_remove(";"),
+         name = str_remove(name, ".*;")) %>% 
+  ggraph(layout = "nicely") +
+  geom_edge_link(aes(width = 1-distance,
+                     alpha = 1-distance)) +
+  geom_node_point(aes(color = name,
+                      shape = dataset),
+                  show.legend = F) +
+  geom_node_text(aes(label = str_wrap(name, width = 10)),
+                 lineheight = 0.8,
+                 size = 2) +
+  scale_edge_width(range = c(0, 3),
+                   limits = c(0, 1)) +
+  
+  scale_edge_alpha(range = c(0, 1),
+                   limits = c(0, 1)) +
+  scale_color_manual(values = consensus_palette) +
+  coord_fixed()
+ggsave(savepath("ORA jaccard net.pdf"),
+       width = 8, height = 8)
 
 ```
 
