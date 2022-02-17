@@ -36,6 +36,7 @@ library(ggalluvial)
 library(uwot)
 library(aricode)
 library(treemapify)
+library(ggbeeswarm)
 
 source("scripts/functions_utility.R")
 source("scripts/functions_annotation.R")
@@ -1163,6 +1164,9 @@ consensus_clust_labelorder <-
         map(. %>% 
               with(labels[order])))
 
+consensus_clust_all_plot_order <- 
+  unlist(consensus_clust_labelorder$cor_average) 
+
 tissue_region_clust_cor_ward <- 
   raw_data$tissue_region %>% 
   column_to_rownames("ensg_id") %>% 
@@ -1184,6 +1188,8 @@ tissue_region_clust_labelorder <-
        cor_ward = tissue_region_clust_cor_ward) %>% 
   map(. %>%
         with(labels[order]))
+
+
 
 ```
 
@@ -2493,6 +2499,222 @@ ggsave(savepath("sc protein class bar genes highlight examples.pdf"),
        width = 14, height = 5)  
 
 
+
+```
+
+### Firework plots
+
+```{r}
+
+
+plot_data <-
+  # raw_data[names(raw_data) %in%
+  #            c("tissue_region",
+  #              "blood_sample",
+  #              "celline_consensus",
+  #              "singlecell_sample")] %>% 
+  # list(blood = raw_data$blood_consensus,
+  #      tissue = raw_data$tissue_region,
+  #      singlecell = raw_data$singlecell_consensus,
+  #      celline = raw_data$celline_consensus) %>% 
+  consensus_data %>% 
+  map(. %>% gather(sample, ntpm, -1)) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  left_join(membr_secr_genes) %>% 
+  left_join(gene_classification_long %>% 
+              select(dataset_id, ensg_id, 
+                     sample = enhanced_tissues, 
+                     specificity_category)) %>% 
+  mutate(sample = factor(sample, rev(consensus_clust_all_plot_order)))
+
+plot_data2 <- 
+  plot_data %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(ntpm > 500)
+  
+plot <-
+  plot_data2 %>% 
+  ggplot(aes(ntpm, unclass(sample), color = class)) +
+  geom_beeswarm_rast(groupOnX = F,
+                     size = 1) +
+  geom_text_repel(data = . %>% 
+                    group_by(sample) %>% 
+                    top_n(5, ntpm),
+                  aes(label = display_name), 
+                  direction = "y",
+                  size = 3) +
+  facet_grid(sample ~ .,
+             scale = "free_y",
+             space = "free") +
+  # facet_wrap(~ sample) +
+  scale_x_log10() +
+  scale_color_manual(values = protein_loc_palette) +
+  scale_y_continuous(expand = expansion(0, 0.025)) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        strip.text.y = element_text(angle = 0,
+                                    hjust = 0), 
+        strip.background = element_blank(),
+        panel.border = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "top",
+        panel.spacing = unit(0, "mm"))
+ggsave(savepath("Top exp firework all.pdf"),
+       plot = plot,
+       width = 10,
+       height = 49)
+
+# plot <-
+plot_data2 %>% 
+  filter(sample %in% c("Alveolar cells type 2",
+                       "Enteroendocrine cells", 
+                       "Late spermatids", 
+                       "Plasma cells", 
+                       "Erythroid cells",
+                       "Inhibitory neurons",
+                       "Cardiomyocytes")) %>% 
+  ggplot(aes(ntpm, unclass(sample), color = class)) +
+  geom_beeswarm_rast(groupOnX = F,
+                     size = 0.1) +
+  geom_text_repel(data = . %>% 
+                    group_by(sample) %>% 
+                    top_n(5, ntpm),
+                  aes(label = display_name), 
+                  direction = "y",
+                  size = 3) +
+  facet_grid(sample ~ .,
+             scale = "free_y",
+             space = "free") +
+  # facet_wrap(~ sample) +
+  scale_x_log10() +
+  scale_color_manual(values = protein_loc_palette) +
+  scale_y_continuous(expand = expansion(0, 0.025)) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        strip.text.y = element_text(angle = 0,
+                                    hjust = 0), 
+        strip.background = element_blank(),
+        panel.border = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "top",
+        panel.spacing = unit(0, "mm"))
+ggsave(savepath("Top exp firework examples.pdf"),
+       width = 6,
+       height = 5)
+
+
+plot_data3 <- 
+  plot_data %>% 
+  filter(dataset_id == "singlecell",
+         specificity_category %in% c("Tissue enriched",
+                                     "Group enriched"))
+
+plot <- 
+  plot_data3 %>% 
+  ggplot(aes(ntpm, unclass(sample), color = class)) +
+  geom_beeswarm_rast(groupOnX = F,
+                     size = 1) +
+  geom_text_repel(data = . %>% 
+                    group_by(sample) %>% 
+                    top_n(5, ntpm),
+                  aes(label = display_name), 
+                  direction = "y",
+                  size = 3) +
+  facet_grid(sample ~ .,
+             scale = "free_y",
+             space = "free") +
+  # facet_wrap(~ sample) +
+  scale_x_log10() +
+  scale_color_manual(values = protein_loc_palette) +
+  scale_y_continuous(expand = expansion(0, 0.025)) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        strip.text.y = element_text(angle = 0,
+                                    hjust = 0), 
+        strip.background = element_blank(),
+        panel.border = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "top",
+        panel.spacing = unit(0, "mm"))
+ggsave(savepath("Enriched firework all.pdf"),
+       plot = plot,
+       width = 10, height = 49)
+
+plot_data3 %>% 
+  filter(sample %in% c("Alveolar cells type 2",
+                       "Enteroendocrine cells", 
+                       "Late spermatids", 
+                       "Plasma cells", 
+                       "Erythroid cells",
+                       "Inhibitory neurons",
+                       "Cardiomyocytes")) %>% 
+  arrange(sample) %>% 
+  mutate(sample = factor(sample, unique(sample))) %>% 
+  ggplot(aes(ntpm, unclass(sample), color = class)) +
+  geom_beeswarm_rast(groupOnX = F,
+                     size = 0.1) +
+  geom_text_repel(data = . %>% 
+                    group_by(sample) %>% 
+                    top_n(5, ntpm),
+                  aes(label = display_name), 
+                  direction = "y",
+                  size = 3) +
+  facet_grid(sample ~ .,
+             scale = "free_y",
+             space = "free") +
+  # facet_wrap(~ sample) +
+  scale_x_log10() +
+  scale_color_manual(values = protein_loc_palette) +
+  scale_y_continuous(expand = expansion(0, 0.025)) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        strip.text.y = element_text(angle = 0,
+                                    hjust = 0), 
+        strip.background = element_blank(),
+        panel.border = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "top",
+        panel.spacing = unit(0, "mm"))
+ggsave(savepath("Enriched firework examples.pdf"),
+       width = 6, height = 5)
+
+
+# plot_data3 %>% 
+#   filter(sample %in% c("Alveolar cells type 2",
+#                        "Enteroendocrine cells", 
+#                        "Late spermatids", 
+#                        "Plasma cells", 
+#                        "Erythroid cells",
+#                        "Inhibitory neurons")) %>% 
+#   bind_cols(group_by(., sample) %>% 
+#               do({
+#                 beeswarm::swarmx(x = .$sample, 
+#                                  y = log10(.$ntpm),cex = 25, priority = "ascending") %>% 
+#                   as_tibble()
+#               }) %>% 
+#               ungroup() %>% 
+#               select(-sample)) %>% 
+# ggplot(aes(ntpm, x, color = class)) +
+#   geom_point() +
+#   # geom_text(data = . %>% 
+#   #             group_by(sample) %>% 
+#   #             top_n(5, ntpm),
+#   #           aes(label = display_name)) +
+#   scale_x_log10() +
+#   scale_color_manual(values = protein_loc_palette) +
+#   theme_bw()
 
 ```
 
