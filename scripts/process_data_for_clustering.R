@@ -30,7 +30,7 @@ processing_functions <-
          filter(sample != "total PBMC") %>% 
          spread(sample, ntpm),
        brain_tissue = . %>% 
-         select(ensg_id, sample = tissue, ntpm = tmm) %>% 
+         select(ensg_id, sample = tissue, ntpm) %>% 
          spread(sample, ntpm),
        brain_region = . %>% 
          select(ensg_id, sample = tissue, ntpm) %>%

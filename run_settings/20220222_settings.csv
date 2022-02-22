@@ -1,0 +1,6 @@
+dataset_id,dataset,type,additional_heatmap,version
+tissue,tissue,region,,HPA21v2
+brain,brain,tissue,region,HPA21v2
+blood,blood,sample,consensus,HPA21v2
+celline,celline,consensus,,HPA21v2
+singlecell,singlecell,sample,consensus,HPA21v2
