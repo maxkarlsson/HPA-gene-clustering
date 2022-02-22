@@ -48,7 +48,7 @@ source("scripts/functions_classification.R")
 ## Read metadata
 ```{r}
 
-dataset_metadata <- read_csv("run_settings/20210928_settings.csv")
+dataset_metadata <- read_csv("run_settings/20220222_settings.csv")
 
 ```
 

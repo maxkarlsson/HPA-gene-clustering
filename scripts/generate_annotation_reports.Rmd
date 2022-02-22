@@ -46,9 +46,9 @@ simplify <- clusterProfiler::simplify
 ## File structure
 ```{r}
 
-dataset_metadata <- read_csv("run_settings/20210928_settings.csv")
+dataset_metadata <- read_csv("run_settings/20220222_settings.csv")
 
-data_paths <- read_csv("run_settings/20211005 all_datasets.csv")
+data_paths <- read_csv("run_settings/20211012 all_datasets.csv")
 
 file_structure <-
   create_folder_structure(dataset_id = dataset_metadata$dataset_id,
