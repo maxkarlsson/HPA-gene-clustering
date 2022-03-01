@@ -45,7 +45,8 @@ processing_functions <-
          select(ensg_id, sample = celline, ntpm) %>%
          spread(sample, ntpm),
        singlecell_sample = . %>% 
-         spread(sample, ntpm),
+         spread(sample, ntpm) %>% 
+         set_names(str_remove(names(.), ".*;")),
        singlecell_consensus = . %>% 
          spread(cell_type_name, exp))
 
