@@ -165,7 +165,9 @@ HPA_gene_clustering <-
            log_transform = F, 
            k = 10, 
            resolution = 1,
-           seed = 42) {
+           seed = 42,
+           n_neighbors = 20,
+           pruning = 1/15) {
     
     
     if(file.exists(savefile_pca)) {
@@ -254,9 +256,9 @@ HPA_gene_clustering <-
       neighbors <-
         FindNeighbors(
           distance_data,
-          k.param = 20,
+          k.param = n_neighbors,
           compute.SNN = TRUE,
-          prune.SNN = 1/15,
+          prune.SNN = pruning,
           nn.method = "annoy", #Distance metric for annoy. Options include: euclidean, cosine, manhattan, and hamming
           annoy.metric = "euclidean",
           nn.eps = 0,
@@ -562,7 +564,7 @@ find_consensus <- function(all_clusterings, n, get_membership = F, runs = 1) {
   num_clusters <- lapply(c(1:n), function(x)
     all_clusterings %>% 
       pull(paste("seed_", x, sep = "")) %>% 
-      max()) 
+      n_distinct()) 
   
   k <- as.numeric(num_clusters) %>% 
     median() %>% 
@@ -581,6 +583,7 @@ find_consensus <- function(all_clusterings, n, get_membership = F, runs = 1) {
   
   empty_clusters <- 
     final_clustering %>% 
+    #mutate(cluster = as.numeric(cluster)) %>% 
     group_by(cluster) %>% 
     mutate(size = n_distinct(gene)) %>% 
     filter(size < 5) %>% 
@@ -631,14 +634,31 @@ find_consensus <- function(all_clusterings, n, get_membership = F, runs = 1) {
              cons_cluster = as.character(cons_cluster))
     
   } else {
-    final_clustering <- final_clustering %>% 
-      mutate(cluster = as.character(cluster), 
-             cons_cluster = as.character(cluster))
     
+    # final_clustering <- final_clustering %>% 
+    #   mutate(cluster = as.character(cluster), 
+    #          cons_cluster = as.character(cluster))
+    # 
+    # mapping_table <- 
+    #   data.frame(renumbered_cluster = final_clustering$cluster,
+    #              new_cluster = final_clustering$cluster) %>% 
+    #   distinct()
+    # 
     mapping_table <- 
-      data.frame(renumbered_cluster = final_clustering$cluster,
-                 new_cluster = final_clustering$cluster) %>% 
-      distinct()
+      final_clustering %>%
+      select(new_cluster = cluster) %>%
+      mutate(new_cluster = as.character(new_cluster)) %>% 
+      distinct() %>% 
+      arrange(as.numeric(new_cluster)) %>% 
+      rownames_to_column("renumbered_cluster")
+    
+    final_clustering <- 
+      final_clustering %>% 
+      mutate(cons_cluster = as.character(cluster)) %>% 
+      select(-cluster) %>% 
+      left_join(mapping_table, by = c("cons_cluster" = "new_cluster")) %>% 
+      rename(cluster = renumbered_cluster)
+    
   }
   
   if (get_membership) {
@@ -650,8 +670,11 @@ find_consensus <- function(all_clusterings, n, get_membership = F, runs = 1) {
       filter(membership > 0) %>% 
       mutate(cluster = as.character(gsub("V", "", cluster))) %>% 
       rename(cons_cluster = cluster) %>% 
-      left_join(mapping_table %>% rename(cons_cluster = renumbered_cluster,
-                                         cluster = new_cluster)) #%>% 
+      left_join(mapping_table %>% 
+                  mutate(new_cluster = as.character(new_cluster)) %>% 
+                  rename(cons_cluster = new_cluster,
+                         cluster = renumbered_cluster)) %>% 
+      filter(!is.na(cluster))#%>% 
    #   select(-cluster_cons)
     
     return(list(consensus_clustering = final_clustering, 
