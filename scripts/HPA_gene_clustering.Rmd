@@ -107,10 +107,10 @@ run_settings <-
   list(num_seeds = 100,
        final_consensus_resolutions = 
          list("blood" = 4.7,
-              "brain" = 6.1,
+              "brain" = 6.7, #before 2022-02-10 (HPA-v1)-> 6.1
               "celline" = 1.7,
               "singlecell" = 3.1,
-              "tissue" = 7.3),
+              "tissue" = 6.3), #before 2022-02-10 (HPA-v1)-> 7.3
        resolution_upper_limit = c("blood" = 14.5,
                             "brain" = 12.5,
                             "celline" = 15,
@@ -143,6 +143,7 @@ run_settings <-
 
 dataset_palette <- c("tissue" = "#0083C4",  "brain" = "#FFDD00", "blood" = "#CF161A","singlecell" = "#6AA692", "celline" = "#97CF16")
 reliability_palette <- c("High" = "#122740", "Medium" = "#568F8B", "Low" = "#F4F6CC") 
+
 ```
 
 ## File structure
@@ -377,7 +378,7 @@ all_clusters_consensus %>%
   facet_grid(~dataset_id, scales = "free_x") +
   scale_color_manual(values = dataset_palette) +
   xlab("Resolution parameter") +
-  ylab("Number of clusters (k)")+ 
+  ylab("Number of clusters (k)")#+ 
   theme(panel.spacing = unit(4, "lines"))
 
 all_clusters_consensus %>%
@@ -450,7 +451,6 @@ neighbor_data <-
 
 
 
-# UMAP
 ## Read graphs
 ```{r}
 
@@ -1016,8 +1016,8 @@ celline <- all_clusterings %>% filter(dataset_id == "celline",
                                           k > 40,
                                           k < 70)
 tissue <- all_clusterings %>% filter(dataset_id == "tissue",
-                                          k > 70,
-                                          k < 100)
+                                          k > 60, #70
+                                          k < 90)#100
 
 singlecell <- all_clusterings %>% filter(dataset_id == "singlecell",
                                           k > 60,
@@ -1178,6 +1178,25 @@ p1 / p2 / p3 / p4 / p5 +
 ```
 
 
+```{r}
+all_clusters_consensus %>% 
+  left_join(res_k) %>% 
+  filter(dataset_id == "tissue",
+         k == 89) %>% 
+  pull(resolution) %>% unique()
+
+all_clusters_consensus %>% 
+  left_join(res_k) %>% 
+  filter(dataset_id == "brain",
+         k == 72) %>% 
+  pull(resolution) %>% unique()
+
+all_clusters_consensus %>% 
+  left_join(res_k) %>% 
+  filter(dataset_id == "brain",
+         resolution == 6.7) %>% 
+  pull(k) %>% unique()
+```
 
 
 # Final clustering
@@ -1244,6 +1263,11 @@ t - Sys.time()
 final_clusterings %>% 
   group_by(dataset_id) %>% 
   summarise(n_distinct(cluster))
+
+final_clusterings %>% 
+  group_by(dataset_id) %>% 
+  summarise(max(as.numeric(cluster)))
+
 ```
 
 
@@ -1272,9 +1296,11 @@ t <- Sys.time()
 graph_umaps_hulls <- 
   umap_clusteirng %>% 
   group_by(dataset_id) %>% 
-  partition(cluster) %>% 
+  filter(dataset_id =="tissue") %>% 
+  #partition(cluster) %>% 
   do({
     g_data <- .
+    
     g_dataset_id <- 
       unique(g_data$dataset_id)
     
@@ -1287,7 +1313,7 @@ graph_umaps_hulls <-
     
     if(file.exists(savefile_UMAP_hulls)) {
       UMAP_hulls <-
-        read_tsv(savefile_UMAP_hulls)
+        read_tsv(savefile_UMAP_polygons)
       
     } else {
       
@@ -1393,5 +1419,21 @@ ggsave(run_id_savename("UMAP scaled hulls.pdf"),
 #                                   relative_bandwidth = hull_settings$relative_bandwidth[i]) 
 #            
 #          })
+```
+
+```{r}
+
+# compare -> UMAP_hulls
+
+old <- read_tsv("results/Clustering_results/tissue_HPA21v2/UMAP/old/cluster_centers.tsv")
+new <- read_tsv("results/Clustering_results/tissue_HPA21v2/UMAP/cluster_centers.tsv")
+
+old %>% 
+  full_join(new %>% 
+              rename(x_2 = x,
+                     y_2 = y)) %>% 
+  mutate(a = (x-x_2)+(y-y_2)) %>% 
+  filter(a != 0)
+
 ```
 
