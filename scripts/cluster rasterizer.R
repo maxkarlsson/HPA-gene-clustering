@@ -89,17 +89,33 @@ generate_cluster_hulls <-
       ungroup() 
     
     # Classify subclusters
+    # subclusters_classes <- 
+    #   subclusters %>% 
+    #   select(cluster, sub_cluster, n_cluster_genes, n_sub_genes) %>% 
+    #   distinct() %>% 
+    #   group_by(cluster) %>%
+    #   mutate(sub_type = case_when(sub_cluster == 0 ~ "outlier",
+    #                               n_sub_genes / n_cluster_genes < frac_lim ~ "outlier",
+    #                               rank(-n_sub_genes, 
+    #                                    ties.method = "first") == 1 ~ "primary",
+    #                               T ~ "secondary")) %>% 
+    #   select(cluster, sub_cluster, sub_type)
+    
     subclusters_classes <- 
       subclusters %>% 
       select(cluster, sub_cluster, n_cluster_genes, n_sub_genes) %>% 
       distinct() %>% 
       group_by(cluster) %>%
-      mutate(sub_type = case_when(sub_cluster == 0 ~ "outlier",
+      mutate(n_sub_genes = ifelse(sub_cluster == 0, 
+                                  0, 
+                                  n_sub_genes),
+             sub_type = case_when(sub_cluster == 0 ~ "outlier",
                                   n_sub_genes / n_cluster_genes < frac_lim ~ "outlier",
                                   rank(-n_sub_genes, 
                                        ties.method = "first") == 1 ~ "primary",
                                   T ~ "secondary")) %>% 
       select(cluster, sub_cluster, sub_type)
+    
     
     subclusters_classed <- 
       subclusters %>% 
@@ -160,7 +176,6 @@ generate_cluster_hulls <-
       select(cluster, sub_cluster, landmass, n_landmass_points, n_total_points) %>% 
       distinct() %>%
       group_by(cluster, sub_cluster) %>%
-      
       mutate(frac_landmass = n_landmass_points / n_total_points,
              landmass_type = case_when(rank(-n_landmass_points, 
                                             ties.method = "first") == 1 ~ "primary",
