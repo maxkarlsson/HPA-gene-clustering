@@ -7168,8 +7168,8 @@ plot %>%
 
 
 # 5 Protein classes
-
-## Gene litst - db
+## Prepare gene lists
+### All
 ```{r}
 mem_sec <- read_tsv("data/gene_lists/mem_sec_20090.txt")
 essential_1 <- read_tsv("data/gene_lists/crispr_1_celline_more5.txt")
@@ -7232,6 +7232,598 @@ protein_classes <-
               
 ```           
 
+
+### Åsa
+
+```{r}
+
+hpa_hk <- read_tsv("data/gene_lists/HK_2352_HPA_singlecell_SD1_MFC2_ensg.txt") 
+eisen_hk <- read_tsv("data/gene_lists/HK_3537_of_3804_Eisenberg_ensg.txt")
+hrt_hk <- read_tsv("data/gene_lists/HK_2142_of_2176_HRT_ensg.txt")
+#uniprot_mitocarta <- read_tsv("data/gene_lists/.txt")
+mitocarta_mito <- read_tsv("data/gene_lists/1244_mito_mitocarta.txt")
+uniprot_mito <- read_tsv("data/gene_lists/1235_mito_uniprot.txt")
+hpa_mito <- read_tsv("data/gene_lists/1139_mito_HPA_ICC.txt")
+ribosomal <- read_tsv("data/gene_lists/82_ribosomal_largesmall_ensg.txt")
+uniprot_mitocarta <- 
+  intersect(uniprot_mito %>% deframe(), mitocarta_mito %>% deframe())
+
+
+protein_classes_A <- 
+  hpa_hk %>% 
+  select(gene = x) %>%
+  mutate(term_id = "hpa_hk") %>% 
+  full_join(drug_targets %>% 
+              select(gene = ensg_id) %>% 
+              mutate(term_id = "drug_targets")) %>% 
+  full_join(gpcr_olfactory %>% 
+              select(gene = ensg_id) %>% 
+              mutate(term_id = "gpcr_olfactory")) %>% 
+  full_join(mitocarta_mito %>% 
+              select(gene = x) %>% 
+              mutate(term_id = "mitocarta_mito")) %>% 
+  full_join(uniprot_mito %>% 
+              select(gene = x) %>% 
+              mutate(term_id = "uniprot_mito")) %>% 
+  full_join(eisen_hk %>% 
+              select(gene = x) %>% 
+              mutate(term_id = "eisen_hk")) %>% 
+  full_join(hrt_hk %>% 
+              select(gene = x) %>% 
+              mutate(term_id = "hrt_hk")) %>% 
+  full_join(hpa_mito %>% 
+              select(gene = x) %>% 
+              mutate(term_id = "hpa_mito")) %>% 
+  full_join(gpcr_not_olfactory %>% 
+              select(gene = ensg_id) %>% 
+              mutate(term_id = "gpcr_not_olfactory")) %>% 
+  full_join(ribosomal %>% 
+              select(gene = x) %>% 
+              mutate(term_id = "ribosomal")) %>% 
+  full_join(tibble(gene = uniprot_mitocarta,
+              term_id = "uniprot_mitocarta"))
+
+```
+
+# ORA
+ 
+## All
+
+```{r}
+
+enrichment_file <-  "data/processed/enrichment_all_classes_final.tsv"
+
+
+if(file.exists(enrichment_file)) {
+  enrichment_data <- 
+    read_tsv(enrichment_file)
+  
+} else {
+  
+  ORA_data <-
+    clustering_data
+  
+  
+  ORA_settings <-
+    expand_grid(dataset_id = clustering_data %>% 
+                  filter(dataset_id != "brain") %>% 
+                  pull(dataset_id) %>% 
+                  unique() ,
+                db_dataset_id = "protein_classes") 
+  
+  
+  spec_ORA_res <-
+    ORA_settings %>%
+    group_by_all() %>%
+    do({
+      settings <<- .
+      
+      database <-
+        ORA_data %>%
+        filter(dataset_id == settings$dataset_id) %>%
+        select(term_id = cluster,
+               gene)
+      gene_associations <-
+        protein_classes %>% 
+        select(partition = term_id, gene)
+      
+      universe <- database %>% pull(gene)
+      
+      outdata <-
+        gene_associations %>%
+        group_by(partition) %>% 
+        do({
+          g_data <<- .
+          
+          pull(g_data, gene) %>%
+            enricher(maxGSSize = Inf,
+                     universe = universe,
+                     TERM2GENE = database) %>%
+            as_tibble()
+        }) %>%
+        ungroup() 
+      
+    }) %>%
+    ungroup()
+  
+  # Bubble plot
+  
+  enrichment_data <- 
+    spec_ORA_res %>%  
+    # filter(id != dataset_id) %>% 
+    mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
+             as.numeric(gsub(".*\\/", "", GeneRatio)),
+           BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
+             as.numeric(gsub(".*\\/", "", BgRatio)),
+           odds_ratio = GeneFrac / BgFrac) 
+  
+  write_tsv(enrichment_data, enrichment_file)
+}
+
+enrichment_data_all <- enrichment_data
+```
+
+
+## Åsa
+
+```{r}
+
+enrichment_file <-  "data/processed/enrichment_all_classes_final.tsv"
+
+
+if(file.exists(enrichment_file)) {
+  enrichment_data <- 
+    read_tsv(enrichment_file)
+  
+} else {
+  
+  ORA_data <-
+    clustering_data
+  
+  
+  ORA_settings <-
+    expand_grid(dataset_id = clustering_data %>% 
+                  filter(dataset_id != "brain") %>% 
+                  pull(dataset_id) %>% 
+                  unique() ,
+                db_dataset_id = "protein_classes") 
+  
+  
+  spec_ORA_res <-
+    ORA_settings %>%
+    group_by_all() %>%
+    do({
+      settings <<- .
+      
+      database <-
+        ORA_data %>%
+        filter(dataset_id == settings$dataset_id) %>%
+        select(term_id = cluster,
+               gene)
+      gene_associations <-
+        protein_classes_A %>% 
+        select(partition = term_id, gene)
+      
+      universe <- database %>% pull(gene)
+      
+      outdata <-
+        gene_associations %>%
+        group_by(partition) %>% 
+        do({
+          g_data <<- .
+          
+          pull(g_data, gene) %>%
+            enricher(maxGSSize = Inf,
+                     universe = universe,
+                     TERM2GENE = database) %>%
+            as_tibble()
+        }) %>%
+        ungroup() 
+      
+    }) %>%
+    ungroup()
+  
+  # Bubble plot
+  
+  enrichment_data <- 
+    spec_ORA_res %>%  
+    # filter(id != dataset_id) %>% 
+    mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
+             as.numeric(gsub(".*\\/", "", GeneRatio)),
+           BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
+             as.numeric(gsub(".*\\/", "", BgRatio)),
+           odds_ratio = GeneFrac / BgFrac) 
+  
+  write_tsv(enrichment_data, enrichment_file)
+}
+
+enrichment_data_some <- enrichment_data
+
+```
+
+### Compare
+
+```{r}
+
+
+enrichment_data_all %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(Description == "ribosomal_proteins")
+
+enrichment_data_some %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(Description == "ribosomal")
+
+test %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(Description == "ribosomal")
+
+test %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(Description == "drug_targets") %>% 
+  arrange(p.adjust)
+
+enrichment_data_all %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(Description == "mitochondrial_proteins")
+
+mitochondrial_proteins
+
+enrichment_data_some %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(Description == "mitochondrial_proteins")
+
+ribosomal
+ribosomal_proteins
+
+
+enrichment_data_all %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(Description == "mitochondrial_proteins")
+
+enrichment_data_some %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(Description == "uniprot_mitocarta")
+
+test %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(Description == "uniprot_mitocarta")
+
+enrichment_data_some %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(partition == "uniprot_mitocarta") %>% 
+  arrange(p.adjust)
+
+enrichment_data_all %>% 
+  filter(dataset_id == "singlecell",
+         partition == "drug_targets")
+```
+
+### Conclusions
+
+```{r}
+
+enrichment_data_some %>% 
+  filter(dataset_id=="singlecell",
+         partition =="drug_targets")
+
+enrichment_data_some %>% 
+  filter(dataset_id=="singlecell",
+         partition =="gpcr_not_olfactory")
+
+enrichment_data_some %>% 
+  filter(dataset_id=="singlecell",
+         partition =="gpcr_olfactory")
+
+test %>% 
+  filter(dataset_id=="singlecell",
+         Description =="gpcr_not_olfactory")
+
+```
+
+## UMAPs
+
+```{r}
+
+clusters_to_umap <- 
+  enrichment_data_some %>% 
+  filter(dataset_id =="singlecell",
+         partition %in% c("ribosomal", "uniprot_mitocarta", "drug_targets", "gpcr_olfactory", "gpcr_not_olfactory")) %>% 
+  select(partition, ID)
+
+umap_palette <- 
+  tibble(classes = c("ribosomal", "uniprot_mitocarta", "drug_targets", 
+                     "gpcr_olfactory", "gpcr_not_olfactory"),
+         colors = c("#E28547",
+                    "#DB5F5B",
+                    "#846FAA",
+                    "#E88471",
+                    "#CF597E")) %>% 
+  deframe()
+
+class <- "gpcr_not_olfactory"
+
+OR_clusters <- 
+  clusters_to_umap %>% 
+  filter(partition == class) %>% 
+  pull(ID)
+
+umap_polygons %>% 
+  mutate(cluster = as.character(cluster)) %>% 
+  left_join(annotation_data) %>%
+  filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(X,Y, group = polygon_id )) +
+  geom_polygon(fill = "grey80")+ 
+  geom_polygon(data = . %>% 
+                 filter(cluster %in% OR_clusters),
+               aes(X,Y, group = polygon_id),
+               inherit.aes = F,
+               fill = umap_palette[class],
+               alpha = 0.7)+ 
+  geom_point(data = protein_classes_A %>%
+               left_join(umap_data) %>%
+               filter(dataset_id == "singlecell",
+                      term_id == class) %>% 
+               left_join(clustering_data %>% 
+                           filter(dataset_id == "singlecell")) ,#%>% 
+             # filter(cluster %in% clusters),
+             inherit.aes = F,
+             size = 0.01,
+             aes(UMAP_1_scaled , UMAP_2_scaled), color = umap_palette[class]) +
+  coord_fixed()+
+  theme_void() +
+  geom_text(data = umap_centers %>%
+              mutate(cluster = as.character(cluster)) %>% 
+              left_join(cluster_annotation) %>% 
+              filter(dataset_id == "singlecell") %>% 
+              filter(cluster %in% OR_clusters), 
+            aes(x, y, label = Specificity),
+            fontface = "bold",
+            hjust =0,
+            vjust= 0,
+            inherit.aes = F,
+            size = 3) +
+  geom_text(data = umap_centers %>%
+              mutate(cluster = as.character(cluster)) %>% 
+              left_join(cluster_annotation) %>% 
+              filter(dataset_id == "singlecell") %>% 
+              filter(cluster %in% OR_clusters), 
+            aes(x, y, label = Function),
+            inherit.aes = F,
+            hjust =0,
+            vjust= 1,
+            size = 3)
+
+ggsave(savepath(paste(class, "umap_singlecell_annotation.pdf", sep = "")),
+       height = 5, 
+       width = 5)
+
+
+clusters_mitochondiral <- 
+  enrichment_data %>% 
+  filter(dataset_id == "singlecell",
+         ID == "mitochondrial_proteins") %>% 
+  pull(partition) %>% 
+  as.numeric() %>% 
+  unique()
+
+
+umap_polygons %>% 
+  mutate(cluster = as.character(cluster)) %>% 
+  left_join(annotation_data) %>%
+  filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(X,Y, group = polygon_id )) +
+  geom_polygon(fill = "grey80")+ 
+  geom_polygon(data = . %>% 
+                 filter(cluster %in% clusters_mitochondiral),
+               aes(X,Y, group = polygon_id),
+               inherit.aes = F,
+               fill = "#DB5F5B",
+               alpha = 0.7)+ 
+  geom_point(data = protein_classes %>%
+               left_join(umap_data) %>%
+               filter(dataset_id == "singlecell",
+                      term_id == "mitochondrial_proteins") %>% 
+               left_join(clustering_data %>% 
+                           filter(dataset_id == "singlecell")) ,#%>% 
+             # filter(cluster %in% clusters),
+             inherit.aes = F,
+             size = 0.01,
+             aes(UMAP_1_scaled , UMAP_2_scaled), color = "#DB5F5B") +
+  theme_void() +
+  coord_fixed()+
+   geom_text(data = umap_centers %>%
+              mutate(cluster = as.character(cluster)) %>% 
+              left_join(cluster_annotation) %>% 
+              filter(dataset_id == "singlecell") %>% 
+              filter(cluster %in% clusters_mitochondiral), 
+            aes(x, y, label = Specificity),
+            fontface = "bold",
+            hjust =0,
+            vjust= 0,
+            inherit.aes = F,
+            size = 3) +
+  geom_text(data = umap_centers %>%
+              mutate(cluster = as.character(cluster)) %>% 
+              left_join(cluster_annotation) %>% 
+              filter(dataset_id == "singlecell") %>% 
+              filter(cluster %in% clusters_mitochondiral), 
+            aes(x, y, label = Function),
+            inherit.aes = F,
+            hjust =0,
+            vjust= 1,
+            size = 3)
+
+ggsave(savepath("umap_mitochondrial_annotations_singlecell.pdf"))
+
+clusters_ribosomal <- 
+  enrichment_data %>% 
+  filter(dataset_id == "singlecell",
+         ID == "ribosomal_proteins") %>% 
+  pull(partition) %>% 
+  as.numeric() %>% 
+  unique()
+
+
+umap_polygons %>% 
+  mutate(cluster = as.character(cluster)) %>% 
+  left_join(annotation_data) %>%
+  filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(X,Y, group = polygon_id )) +
+  geom_polygon(fill = "grey80")+ 
+  geom_polygon(data = . %>% 
+                 filter(cluster %in% clusters_ribosomal),
+               aes(X,Y, group = polygon_id),
+               inherit.aes = F,
+               fill = "#E28547",
+               alpha = 0.7)+ 
+  geom_point(data = protein_classes %>%
+               left_join(umap_data) %>%
+               filter(dataset_id == "singlecell",
+                      term_id == "ribosomal_proteins") %>% 
+               left_join(clustering_data %>% 
+                           filter(dataset_id == "singlecell")) ,#%>% 
+             # filter(cluster %in% clusters),
+             inherit.aes = F,
+             size = 0.01,
+             aes(UMAP_1_scaled , UMAP_2_scaled), color = "#E28547") +
+  theme_void() +
+  coord_fixed()+
+  # scale_color_manual(values = pal1)+
+  geom_text(data = umap_centers %>%
+              mutate(cluster = as.character(cluster)) %>% 
+              left_join(cluster_annotation) %>% 
+              filter(dataset_id == "singlecell") %>% 
+              filter(cluster %in% clusters_ribosomal), 
+            aes(x, y, label = full_annotation),
+            inherit.aes = F,
+            size = 3)
+
+ggsave(savepath("umap_ribosomal_annotations_singlecell.pdf")
+
+
+clusters_gpcr_not_olfactory <- 
+  enrichment_data %>% 
+  filter(dataset_id == "singlecell",
+         ID == "gpcr_not_olfactory") %>% 
+  pull(partition) %>% 
+  as.numeric() %>% 
+  unique()
+
+
+umap_polygons %>% 
+  mutate(cluster = as.character(cluster)) %>% 
+  left_join(annotation_data) %>%
+  filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(X,Y, group = polygon_id )) +
+  geom_polygon(fill = "grey80")+ 
+  geom_polygon(data = . %>% 
+                 filter(cluster %in% clusters_gpcr_not_olfactory),
+               aes(X,Y, group = polygon_id),
+               inherit.aes = F,
+               fill = "#CF597E",
+               alpha = 0.7)+ 
+  geom_point(data = protein_classes %>%
+               left_join(umap_data) %>%
+               filter(dataset_id == "singlecell",
+                      term_id == "gpcr_not_olfactory") %>% 
+               left_join(clustering_data %>% 
+                           filter(dataset_id == "singlecell")) ,#%>% 
+             # filter(cluster %in% clusters),
+             inherit.aes = F,
+             size = 0.01,
+             aes(UMAP_1_scaled , UMAP_2_scaled), color = "#CF597E") +
+  theme_void() +
+  coord_fixed()+
+  # scale_color_manual(values = pal1)+
+  geom_text(data = umap_centers %>%
+              mutate(cluster = as.character(cluster)) %>% 
+              left_join(cluster_annotation) %>% 
+              filter(dataset_id == "singlecell") %>% 
+              filter(cluster %in% clusters_gpcr_not_olfactory), 
+            aes(x, y, label = Specificity),
+            fontface = "bold",
+            hjust =0,
+            vjust= 0,
+            inherit.aes = F,
+            size = 3) +
+  geom_text(data = umap_centers %>%
+              mutate(cluster = as.character(cluster)) %>% 
+              left_join(cluster_annotation) %>% 
+              filter(dataset_id == "singlecell") %>% 
+              filter(cluster %in% clusters_gpcr_not_olfactory), 
+            aes(x, y, label = Function),
+            inherit.aes = F,
+            hjust =0,
+            vjust= 1,
+            size = 3)
+
+ggsave(savepath("umap_gpcr_not_olfactory_annotations_singlecell.pdf"))
+
+
+clusters_gpcr_olfactory <- 
+  enrichment_data %>% 
+  filter(dataset_id == "singlecell",
+         ID == "gpcr_olfactory") %>% 
+  pull(partition) %>% 
+  as.numeric() %>% 
+  unique()
+
+
+umap_polygons %>% 
+  mutate(cluster = as.character(cluster)) %>% 
+  left_join(annotation_data) %>%
+  filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(X,Y, group = polygon_id )) +
+  geom_polygon(fill = "grey80")+ 
+  geom_polygon(data = . %>% 
+                 filter(cluster %in% clusters_gpcr_olfactory),
+               aes(X,Y, group = polygon_id),
+               inherit.aes = F,
+               fill = "#E88471",
+               alpha = 0.7)+ 
+  geom_point(data = protein_classes %>%
+               left_join(umap_data) %>%
+               filter(dataset_id == "singlecell",
+                      term_id == "gpcr_olfactory") %>% 
+               left_join(clustering_data %>% 
+                           filter(dataset_id == "singlecell")) ,#%>% 
+             # filter(cluster %in% clusters),
+             inherit.aes = F,
+             size = 0.01,
+             aes(UMAP_1_scaled , UMAP_2_scaled), color = "#E88471") +
+  theme_void() +
+  coord_fixed()+
+  # scale_color_manual(values = pal1)+
+  geom_text(data = umap_centers %>%
+              mutate(cluster = as.character(cluster)) %>% 
+              left_join(cluster_annotation) %>% 
+              filter(dataset_id == "singlecell") %>% 
+              filter(cluster %in% clusters_gpcr_olfactory), 
+            aes(x, y, label = Specificity),
+            fontface = "bold",
+            hjust =0,
+            vjust= 0,
+            inherit.aes = F,
+            size = 3) +
+  geom_text(data = umap_centers %>%
+              mutate(cluster = as.character(cluster)) %>% 
+              left_join(cluster_annotation) %>% 
+              filter(dataset_id == "singlecell") %>% 
+              filter(cluster %in% clusters_gpcr_olfactory), 
+            aes(x, y, label = Function),
+            inherit.aes = F,
+            hjust =0,
+            vjust= 1,
+            size = 3)
+
+ggsave(savepath("umap_gpcr_olfactory_annotations_singlecell.pdf"))
+
+```
+
+
+
+# - ####################
 ## Radar plots - single cell
 
 ### Prepare single cell data
@@ -8777,6 +9369,90 @@ clustering_data %>%
 
 ```{r}
 #Average expression in different cell types / clusters
+
+```
+
+
+## ORA - cutoffs
+
+```{r}
+
+
+#enrichment_file <-  "data/processed/enrichment_protein_classes_extended.tsv"
+enrichment_file <-  "data/processed/enrichment_protein_classes_20220428_cutoff_3.tsv"
+
+
+if(file.exists(enrichment_file)) {
+  enrichment_data <- 
+    read_tsv(enrichment_file)
+  
+} else {
+  
+  ORA_data <-
+    clustering_data
+  
+  
+  ORA_settings <-
+    expand_grid(dataset_id = clustering_data %>% 
+                  filter(dataset_id != "brain") %>% 
+                  pull(dataset_id) %>% 
+                  unique() ,
+                db_dataset_id = "protein_classes") 
+  
+  
+  spec_ORA_res <-
+    ORA_settings %>%
+    group_by_all() %>%
+    do({
+      settings <<- .
+      
+      gene_associations <-
+        ORA_data %>%
+        filter(dataset_id == settings$dataset_id) %>%
+        select(partition = cluster,
+               gene)
+      database <-
+        protein_classes %>% 
+        select(term_id, gene)
+      
+      universe <- gene_associations %>% pull(gene)
+      
+      outdata <-
+        gene_associations %>%
+        group_by(partition) %>% 
+        do({
+          g_data <<- .
+          
+          pull(g_data, gene) %>%
+            enricher(maxGSSize = Inf,
+                     universe = universe,
+                     pAdjustMethod = "BH",
+                     #qvalueCutoff = 0.1,
+                     TERM2GENE = database) %>%
+            as_tibble()
+        }) %>%
+        ungroup() 
+      
+    }) %>%
+    ungroup()
+  
+  # Bubble plot
+  
+  enrichment_data <- 
+    spec_ORA_res %>%  
+    # filter(id != dataset_id) %>% 
+    mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
+             as.numeric(gsub(".*\\/", "", GeneRatio)),
+           BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
+             as.numeric(gsub(".*\\/", "", BgRatio)),
+           odds_ratio = GeneFrac / BgFrac) 
+  
+  write_tsv(enrichment_data, enrichment_file)
+}
+
+enrichment_data %>% 
+  filter(dataset_id =="singlecell",
+         Description == "ribosomal_proteins")
 
 ```
 

@@ -1,0 +1,318 @@
+---
+title: "Supplementary data 4"
+author: "María Bueno Álvez"
+date: "5/23/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Load libraries
+
+```{r}
+
+library(tidyverse)
+library(multidplyr)
+library(magrittr)
+library(pbapply)
+source("scripts/functions_utility.R")
+source("scripts/functions_annotation.R")
+
+select <- dplyr::select
+slice <- dplyr::slice
+rename <- dplyr::rename
+simplify <- clusterProfiler::simplify
+
+```
+
+
+# Load data
+
+```{r}
+
+## File structure
+dataset_metadata <- read_csv("run_settings/20220222_settings.csv")
+
+data_paths <- read_csv("run_settings/20211108 all_datasets.csv")
+
+file_structure <-
+  create_folder_structure(dataset_id = dataset_metadata$dataset_id,
+                          dataset_run_id = dataset_metadata$version,
+                          main_folder = "results/Clustering_results",
+                          folders = c("data" = "data", 
+                                      "svg" = "svg",
+                                      "bubbleheatmap" = "svg/bubble",
+                                      "treemap" = "svg/treemap",
+                                      "heatmap" = "svg/heatmap",
+                                      "enrichment" = "enrichment",
+                                      "clustering" = "clustering"))
+
+## Load clustering data
+clustering_data <- 
+  file_structure %>% 
+  map(function(x) x$clustering) %>% 
+  map(function(x) {
+    file_ <- paste(x, "final_consensus.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  mutate(cluster = as.character(cluster)) 
+
+
+## Load gene mapping
+entrez_dict <- 
+  read_tsv("data/meta/ensembl103_entrez.txt") %>% 
+  select(ensg_id = 1, 
+         entrez = 2) %>% 
+  filter(!is.na(entrez))
+
+gene_info <- 
+  read_tsv("data/meta/geneinfo_103.tsv")
+
+
+
+## Load databases
+enrichment_settings <- 
+  read_csv("run_settings/20220315 enrichment_settings.csv")
+
+
+gene_classification <- 
+  enrichment_settings %>% 
+  filter(grepl("specificity", id)) %>% 
+  group_by(id) %>% 
+  do({
+    g_data <<- .
+    
+    get_specificity_db(enrichment_settings, g_data$id)
+    
+  }) %>% 
+  ungroup()
+
+# Load enrichments
+enrichment_results <- 
+  file_structure %>% 
+  map(function(x) x$enrichment) %>% 
+  map(function(x) {
+    file_ <- paste(x, "enrichment_results.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  mutate(cluster = as.character(cluster)) 
+
+```
+
+
+# Gene info
+
+## Tissue
+
+```{r}
+
+tissue_genes <- 
+  gene_classification %>% 
+  filter(id == "specificity_tissue") %>% 
+  arrange(ensg_id) %>% 
+  left_join(gene_info %>% 
+              select(ensg_id,gene_name)) %>% 
+  left_join(clustering_data %>% 
+              filter(dataset_id == "tissue") %>% 
+              select(ensg_id = gene, Cluster = cluster)) %>% 
+  select(`Gene name` = gene_name, `Ensembl 103 ID` = ensg_id, Specificity = specificity_category, `Enhanced tissues` = enhanced_tissues, Cluster)
+
+
+write_excel_csv(tissue_genes, "tissue_genes.csv")
+
+```
+
+
+## Single cell
+
+```{r}
+
+singlecell_genes <- 
+  gene_classification %>% 
+  filter(id == "specificity_singlecell") %>% 
+  left_join(gene_info %>% 
+              select(ensg_id,gene_name)) %>% 
+  left_join(clustering_data %>% 
+              filter(dataset_id == "singlecell") %>% 
+              select(ensg_id = gene, Cluster = cluster)) %>% 
+  select(`Gene name` = gene_name, `Ensembl 103 ID` = ensg_id, Specificity = specificity_category, `Enhanced tissues` = enhanced_tissues, Cluster)
+
+write_excel_csv(singlecell_genes, "singlecell_genes.csv")
+
+```
+
+
+# Enrichment info
+
+## ID mapping
+
+```{r}
+
+genes_all <- 
+  singlecell_genes %>% pull(`Ensembl 103 ID`)
+ 
+
+entrez_dict %>% 
+  filter(ensg_id %in% genes_all)
+
+
+a <- 
+  clustering_data %>%
+  left_join(entrez_dict,
+            by = c("gene" = "ensg_id"))
+
+a %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(is.na(entrez))
+
+
+# 558 for tissue
+#470 for single cell
+
+
+
+####  
+ genes <- 
+   clustering_data %>% 
+   filter(dataset_id =="singlecell")
+entrez_dict %>% 
+  filter(ensg_id %in% genes)
+
+mapping_table <-
+  gene_info %>% 
+  select(old_id = ensg_id, 
+         new_id = gene_name) %>% 
+  bind_rows(entrez_dict %>% 
+              left_join(gene_info %>% 
+                          select(ensg_id,gene_name))  %>%
+              select(old_id = entrez, 
+                     new_id = gene_name) %>% 
+              na.omit() %>% 
+              mutate(old_id = as.character(old_id)))
+              
+
+id_string <-  "ENSG00000100162/ENSG00000102384/ENSG00000115163/ENSG00000120334/ENSG00000123219/ENSG00000138092/ENSG00000153044/ENSG00000159055"        
+
+id_map <- function(id_string) {
+  
+  # old_id_string <- id_string
+  # length_in <-
+  #   id_string %>%
+  #   strsplit("/") %>%
+  #   unlist() %>%
+  #   length()
+    
+    
+  new_id_string <- 
+    id_string %>% 
+    strsplit("/") %>% 
+    unlist() %>% 
+    enframe("a", "old_id") %>% 
+    select(-a) %>%
+    mutate(old_id = as.character(old_id)) %>% 
+    left_join(mapping_table) %>% 
+    pull(new_id) %>% 
+    unique() %>% 
+    paste(collapse = "/")
+  
+  # length_out <-
+  #   new_id_string %>%
+  #   strsplit("/") %>%
+  #   unlist() %>%
+  #   length()
+  # 
+  # tibble(old_id = old_id_string,
+  #        new_id = new_id_string,
+  #        old_length = length_in,
+  #        new_length= length_out)
+  
+  return(new_id_string)
+}
+
+id_list <- 
+  enrichment_results %>% 
+  filter(dataset_id =="tissue") %>% 
+  pull(geneID)
+
+test_ids <- 
+  lapply(id_list %>% head(100), function(id) {
+  id_map(id)
+})
+
+test_ids %>%
+  bind_rows() %>% mutate(dif = old_length - new_length) %>% 
+  arrange(dif)
+
+"192666/3860/1673/100289462/55894/414325/3868"  %>% 
+  str_split("/") %>% 
+  unlist() %>% 
+  enframe("a","old_id") %>% 
+  left_join(mapping_table)
+
+```
+
+
+## Tissue
+
+```{r}
+
+tissue_enrichment <- 
+  enrichment_results %>% 
+  filter(dataset_id == "tissue") %>% 
+  select(`Cluster ID` = cluster,
+         Database = test_description, 
+         `Term ID` = ID,
+         Term = Description, 
+         GeneRatio,
+         BgRatio,
+         `P-value` = pvalue,
+         `Adjusted P-value` = p.adjust,
+         `Gene IDs` = geneID) %>% 
+  group_by_all() %>% 
+  mutate(`Gene names` = id_map(`Gene IDs`)) %>% 
+  ungroup() %>% 
+#  group_by(Database) %>% 
+  arrange(as.numeric(`Cluster ID`), `Adjusted P-value`) 
+
+write_excel_csv(tissue_enrichment, "tissue_enrichment.csv")
+
+
+```
+
+
+## Single cell
+
+```{r}
+
+singlecell_enrichment <- 
+  enrichment_results %>% 
+  filter(dataset_id == "singlecell") %>% 
+  select(`Cluster ID` = cluster,
+         Database = test_description, 
+         `Term ID` = ID,
+         Term = Description, 
+         GeneRatio,
+         BgRatio,
+         `P-value` = pvalue,
+         `Adjusted P-value` = p.adjust,
+         `Gene IDs` = geneID) %>% 
+  group_by_all() %>% 
+  mutate(`Gene names` = id_map(`Gene IDs`)) %>% 
+  ungroup() %>% 
+  #  group_by(Database) %>% 
+  arrange(as.numeric(`Cluster ID`), `Adjusted P-value`) 
+
+write_excel_csv(singlecell_enrichment, "singlecell_enrichment.csv")
+
+```
+

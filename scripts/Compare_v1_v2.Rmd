@@ -1,0 +1,1696 @@
+---
+title: "Compare_v1_v2"
+author: "María Bueno Álvez"
+date: "3/7/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Set up
+
+## Load libraries
+
+```{r}
+
+library(tidyverse)
+library(patchwork)
+library(aricode)
+library(ggbeeswarm)
+library(readxl)
+library(clusterProfiler)
+
+
+source("scripts/functions_utility.R")
+
+select <- dplyr::select
+rename <- dplyr::rename
+summarise <- dplyr::summarise
+
+```
+
+## File structure
+
+```{r}
+
+data_paths <- read_csv("run_settings/20211012 all_datasets.csv")
+
+dataset_metadata_v1 <- read_csv("run_settings/20210928_settings.csv")
+dataset_metadata_v2 <- read_csv("run_settings/20220222_settings.csv")
+
+file_structure_v1 <-
+  create_folder_structure(dataset_id = dataset_metadata_v1$dataset_id,
+                          dataset_run_id = dataset_metadata_v1$version,
+                          main_folder = "results/Clustering_results",
+                          folders = c("data" = "data", 
+                                      "UMAP" = "UMAP",
+                                      "svg" = "svg",
+                                      "bubbleheatmap" = "svg/bubble",
+                                      "treemap" = "svg/treemap",
+                                      "heatmap" = "svg/heatmap",
+                                      "enrichment" = "enrichment",
+                                      "clustering" = "clustering"))
+
+file_structure_v2 <-
+  create_folder_structure(dataset_id = dataset_metadata_v2$dataset_id,
+                          dataset_run_id = dataset_metadata_v2$version,
+                          main_folder = "results/Clustering_results",
+                          folders = c("data" = "data", 
+                                      "UMAP" = "UMAP",
+                                      "svg" = "svg",
+                                      "bubbleheatmap" = "svg/bubble",
+                                      "treemap" = "svg/treemap",
+                                      "heatmap" = "svg/heatmap",
+                                      "enrichment" = "enrichment",
+                                      "clustering" = "clustering"))
+
+```
+
+
+## Load clustering data
+
+```{r}
+
+screening_clustering_data_v1 <- 
+  file_structure_v1 %>% 
+  map(function(x) x$clustering) %>% 
+  map(function(x) {
+    file_ <- paste(x, "screening_consensus.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  mutate(cluster = as.character(cluster)) 
+
+screening_clustering_data_v2 <- 
+  file_structure_v2 %>% 
+  map(function(x) x$clustering) %>% 
+  map(function(x) {
+    file_ <- paste(x, "screening_consensus.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  mutate(cluster = as.character(cluster)) 
+
+
+
+final_clustering_data_v1 <- 
+  file_structure_v1 %>% 
+  map(function(x) x$clustering) %>% 
+  map(function(x) {
+    file_ <- paste(x, "final_consensus.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  mutate(cluster = as.character(cluster)) 
+
+final_clustering_data_v2 <- 
+  file_structure_v2 %>% 
+  map(function(x) x$clustering) %>% 
+  map(function(x) {
+    file_ <- paste(x, "final_consensus.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") %>% 
+  mutate(cluster = as.character(cluster)) 
+
+```
+
+
+## Load UMAPs
+
+```{r}
+
+umap_data_v1 <- 
+  file_structure_v1 %>% 
+  map(function(x) x$UMAP) %>% 
+  map(function(x) {
+    file_ <- paste(x, "UMAP.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") 
+
+umap_data_v2 <- 
+  file_structure_v2 %>% 
+  map(function(x) x$UMAP) %>% 
+  map(function(x) {
+    file_ <- paste(x, "UMAP.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") 
+
+
+umap_polygons_v1 <- 
+  file_structure_v1 %>% 
+  map(function(x) x$UMAP) %>% 
+  map(function(x) {
+    file_ <- paste(x, "UMAP_polygons.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") 
+
+umap_polygons_v2 <- 
+  file_structure_v2 %>% 
+  map(function(x) x$UMAP) %>% 
+  map(function(x) {
+    file_ <- paste(x, "UMAP_polygons.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") 
+
+umap_centers_v1 <- 
+  file_structure_v1 %>% 
+  map(function(x) x$UMAP) %>% 
+  map(function(x) {
+    file_ <- paste(x, "cluster_centers.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") 
+
+umap_centers_v2 <- 
+  file_structure_v2 %>% 
+  map(function(x) x$UMAP) %>% 
+  map(function(x) {
+    file_ <- paste(x, "cluster_centers.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") 
+
+```
+
+## Load annotations
+
+```{r}
+
+annotation_data <- 
+  screening_clustering_data_v1 %>%  
+  pull(dataset_id) %>% 
+  unique() %>% 
+  map(function(x) {
+    file_ <- paste0("results/Clustering_annotation/20211124 ", x, ".xlsx", sep = "")
+    if(file.exists(file_)) {
+      file <- read_excel(file_) 
+      file %>% 
+        as_tibble() %>% 
+        mutate(dataset_id = x)
+    } else {
+      NULL
+    }
+  })  %>% 
+  bind_rows() %>% 
+  select(dataset_id, 
+         cluster = `Cluster ID`,
+         ngenes = `Num genes`,
+         reliability = Reliability,
+         Specificity,
+         Function)  %>%   
+  mutate(cluster = as.character(cluster))
+
+cluster_annotation <- 
+  annotation_data %>% 
+  mutate(full_annotation = paste(cluster,
+                                 Specificity, 
+                                 Function, 
+                                 sep = " - ")) 
+
+```
+
+## Color data & themes
+
+```{r}
+colors_consensus <-
+  read_tsv("data/colors/colors_consensus.tsv") 
+
+old_dataset_palette <- c("tissue" = "#0083C4",  "brain" = "#FFDD00", "blood" = "#CF161A", "singlecell" = "#6AA692", "celline" = "#97CF16") 
+
+dataset_palette <- 
+  c(celline = "#ED446D",
+    blood = "#FFA93A",
+    tissue = "#20639A",
+    singlecell = "#3BAEA1")
+
+new_dataset_palette <- 
+  c("Tissue" = "#20639A",
+    "Single cell type" = "#3BAEA1",
+    "Cell line" = "#ED446D",
+    "Immune cell" = "#FFA93A")
+
+reliability_palette <- c("High" = "#122740", "Medium" = "#568F8B", "Low" = "#F4F6CC") 
+
+all_HPA_colors <-
+  read_tsv("data/meta/HPA21_colors.txt",
+           col_names = c("organ_name", "tissue_name", "color"))
+
+organ_palette <-
+  all_HPA_colors %>%
+  select(organ_name, color) %>%
+  distinct() %>%
+  deframe()
+
+tissue_palette <-
+  all_HPA_colors %>%
+  filter(organ_name != "Brain") %>%
+  gather(tissue_type, tissue, 1, 2) %>%
+  select(tissue, color) %>%
+  distinct() %>%
+  bind_rows(mutate(.,
+                   tissue = str_to_sentence(tissue))) %>%
+  bind_rows(cluster_annotation %>%
+              select(Specificity) %>%
+              distinct() %>%
+              filter(grepl("^Low.*specificity$", Specificity)) %>%
+              rename(tissue = 1) %>%
+              mutate(color = "darkgray")) %>%
+  bind_rows(all_HPA_colors %>%
+              filter(organ_name == "Brain") %>%
+              select(tissue = organ_name, color) %>%
+              distinct())
+
+cluster_color_pal <-
+  tableau_color_pal(palette = "Classic Cyclic",
+                    type = 'regular')(13) %>%
+  colorRampPalette()
+
+plot_pal <-
+  complete_palette(pal_terms = unique(cluster_annotation$Specificity),
+                   pal = deframe(tissue_palette),
+                   default_pal = cluster_color_pal)
+plot_pal <-
+  complete_palette_neighbor(pal_terms = unique(cluster_annotation$Specificity),
+                            pal = deframe(tissue_palette))
+
+
+ontology_pal <- 
+  c("MF" = "#FF6F00",
+    "CC" = "#C71B00",
+    "BP" = "#018EA0")
+
+
+blood_colors <- 
+  read_csv("data/meta/Blood cell colors.csv")
+
+sc_colors <- 
+  read_tsv("data/meta/HPA_colors/Single cell type.txt", col_names = F)
+
+gene_category_pal <-
+  c("Tissue enriched" = "#e41a1c",
+    "Group enriched" = "#FF9D00",
+    "Tissue enhanced" = "#984ea3",
+    "Low tissue specificity" = "grey40",
+    "Not detected" = "grey")
+
+
+cluster_sp_pal <- c("Specific" = "#CBD4EF", 
+                    "Non-specific" = "#2A428C")
+
+theme_simple <- 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+
+theme_1 <- 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), 
+        axis.title.x = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+theme_2 <- 
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+```
+
+# Compare UMAPs
+
+```{r}
+
+# Color space
+plot_data <-
+  umap_data_v1 %>%
+  group_by(dataset_id) %>% 
+  mutate(r = scales::rescale(UMAP_1_scaled , c(0,1)),
+         g = scales::rescale(UMAP_2_scaled, c(0,1)),
+         b = 0.5,
+         color = rgb(r, g, b)) 
+
+umaps_v1 <- 
+  plot_data %>% 
+  ggplot(aes(UMAP_1_scaled, UMAP_2_scaled, color = color)) +
+    geom_point(size = 0.1) +
+    theme_bw() +
+  scale_color_identity()+
+    coord_fixed() +
+  facet_wrap(~dataset_id, ncol = 5) +
+  theme_void() +
+  ggtitle("HPA clustering - Version 1") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+umaps_v2 <-
+  umap_data_v2 %>%
+  left_join(plot_data %>% 
+              select(dataset_id,gene,color)) %>% 
+  ggplot(aes(UMAP_1_scaled, UMAP_2_scaled, color = color)) +
+    geom_point(size = 0.1) +
+    theme_bw() +
+  scale_color_identity()+
+    coord_fixed() +
+  facet_wrap(~dataset_id, ncol = 5) +
+  theme_void() +
+  ggtitle("HPA clustering - Version 2") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+umaps_v1 / umaps_v2
+
+ggsave("results/Comparison_v1_v2/umaps.pdf")
+
+```
+
+# Compare clustering
+
+## Resolution range
+
+```{r}
+screening_v1_v2 <-
+  screening_clustering_data_v1 %>% 
+  mutate(version = "v_1") %>% 
+  bind_rows(screening_clustering_data_v2 %>% 
+              mutate(version = "v_2"))
+
+screening_v1_v2 %>% 
+  group_by(version,dataset_id,resolution) %>% 
+  summarise(k = n_distinct(cluster)) %>% 
+  ggplot(aes(k,resolution,color = version)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~dataset_id, ncol = 5) +
+  theme_simple +
+  ggtitle("Relationship between resolution and number of clusters (k)") +
+  theme(plot.title = element_text(hjust=0.5))
+
+ggsave("results/Comparison_v1_v2/resolution_k.pdf")
+
+screening_v1_v2 %>% 
+  group_by(dataset_id,version) %>% 
+  mutate(resolution = as.numeric(resolution)) %>% 
+  summarise(max(resolution)) 
+
+screening_v1_v2 %>% 
+  mutate(resolution = as.numeric(resolution)) %>% 
+  select(dataset_id, version, resolution) %>% 
+  distinct() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(n= n_distinct(version)) %>% 
+  filter(n < 2)
+
+screening_v1_v2 %>% 
+  mutate(resolution = as.numeric(resolution)) %>% 
+  select(dataset_id, version, resolution) %>% 
+  distinct() %>% 
+  group_by(dataset_id, resolution) %>% 
+  summarise(n= n_distinct(version)) %>% 
+  ggplot(aes(dataset_id,resolution, color= as.factor(n))) +
+  geom_quasirandom()+
+  theme_simple
+
+```
+
+## Number of genes
+
+```{r}
+
+#Tissue
+equiv <- 
+  screening_v1_v2 %>% 
+  filter(dataset_id == "tissue",
+         resolution == 1.1) %>% 
+  group_by(version) %>% 
+  group_split()
+
+d1 <-
+  equiv[[1]] %>% 
+  select(gene, cluster) %>% 
+  deframe()
+
+d2 <-
+  equiv[[2]] %>% 
+  select(gene, cluster) %>% 
+  deframe()
+
+# 4 more genes in tissue v2
+names(d1) %>% length()
+names(d2) %>% length()
+
+diff_genes_tissue <- #14 -> 32
+  union(setdiff(names(d1),names(d2)), 
+        setdiff(names(d2),names(d1)))
+
+#Brain
+equiv <- 
+  screening_v1_v2 %>% 
+  mutate(resolution = as.character(resolution)) %>% 
+  filter(dataset_id == "brain",
+         resolution == "1.7") %>% 
+  group_by(version) %>% 
+  group_split()
+
+d1 <-
+  equiv[[1]] %>% 
+  select(gene, cluster) %>% 
+  deframe()
+
+d2 <-
+  equiv[[2]] %>% 
+  select(gene, cluster) %>% 
+  deframe()
+
+names(d1) %>% length()
+names(d2) %>% length()
+
+diff_genes_brain <- #139 -> 236
+ union(setdiff(names(d1),names(d2)), 
+        setdiff(names(d2),names(d1)))
+
+
+```
+
+
+```{r}
+
+# ARI between equivalent
+
+ARI_v1_v2_test <- 
+  screening_v1_v2 %>% 
+  filter(!(dataset_id == "tissue" & resolution > 9.6),
+         !(dataset_id == "brain" & resolution > 11.8)) %>% 
+  group_by(dataset_id,resolution) %>% 
+  do({
+    
+    dat <- .
+    dataset <- unique(dat$dataset_id)
+    
+    if(dataset == "tissue") {
+      dat <- 
+        dat %>% 
+        filter(!gene %in% diff_genes_tissue)
+      
+    } else if(dataset == "brain") {
+      dat <- 
+        dat %>% 
+        filter(!gene %in% diff_genes_brain)
+    } else {
+      dat <- dat
+    }
+    
+    #dat <<- dat
+    equiv_clusters <- 
+      dat %>% 
+      group_by(version) %>% 
+      group_split()
+    
+    cluster_v1 <-
+      equiv_clusters[[1]] %>% 
+      select(gene, cluster) %>% 
+      deframe()
+    
+    cluster_v2 <-
+      equiv_clusters[[2]] %>% 
+      select(gene, cluster) %>% 
+      mutate(cluster = as.numeric(cluster) + 10) %>% 
+      mutate(cluster = as.character(cluster)) %>% 
+      deframe()
+    
+    ARI_res <- ARI(cluster_v1,cluster_v2)
+    
+    data.frame(ARI_score = ARI_res)
+    
+  })
+
+ARI_v1_v2_test %>% 
+  ggplot(aes(resolution,ARI_score,color=dataset_id)) +
+  geom_point(size = 1, alpha = 0.7) +
+  facet_wrap(~dataset_id, ncol = 5, scales = "free") +
+  theme_simple +
+  scale_color_manual(values = old_dataset_palette) +
+  ggtitle("ARI - version 1 & 2") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("results/Comparison_v1_v2/ARI.pdf")
+
+```
+
+## Explore cluster / cons_cluster
+
+```{r}
+
+# Cluster and consensus cluster is not the same
+screening_clustering_data_v2 %>% 
+  mutate(cluster = as.numeric(cluster),
+         dif = (cluster - cons_cluster)) %>% 
+  pull(dif) %>% 
+  unique()
+
+```
+
+
+# Compare tissue clustering
+
+
+## ARI score
+
+```{r}
+
+v1 <- final_clustering_data_v2 %>% 
+  filter(dataset_id == "tissue") %>% 
+  filter(!gene %in% diff_genes_tissue) %>% 
+  select(-dataset_id) %>% 
+  deframe()
+  
+
+
+v2 <- 
+  final_clustering_data_v1 %>% 
+  filter(dataset_id == "tissue")  %>% 
+  filter(!gene %in% diff_genes_tissue) %>% 
+  select(-dataset_id) %>% 
+  deframe()
+
+
+ARI(v1,v2)
+
+
+
+# Load annotations
+
+```
+
+## ORA
+
+```{r}
+
+database <- 
+  final_clustering_data_v1 %>% 
+  filter(dataset_id == "tissue") %>% 
+  filter(!gene %in% diff_genes_tissue) %>% 
+ # select(-dataset_id) %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, full_annotation, cluster)) %>% 
+  select(-cluster,-dataset_id) %>% 
+  select(term = full_annotation, gene)
+  
+  
+clustering <- 
+  final_clustering_data_v2 %>% 
+  filter(dataset_id == "tissue")  %>% 
+  filter(!gene %in% diff_genes_tissue) %>% 
+  select(-dataset_id)  %>% 
+  rename(partition = cluster)
+
+universe <- clustering$gene
+
+library(clusterProfiler)
+outdata <-
+  clustering %>% 
+  group_by(partition) %>% 
+  do({
+    g_data <- .
+    pull(g_data, gene) %>%
+      enricher(universe = universe,
+               TERM2GENE = database, 
+               minGSSize = 10,
+               maxGSSize = Inf,
+               pvalueCutoff = 0,
+               qvalueCutoff = 0) %>%
+      as_tibble()
+  }) %>%
+  ungroup() %>%
+  collect()
+
+outdata %>% 
+  select(partition,ID,GeneRatio,Count) %>% 
+  group_by(partition) %>% 
+    mutate(n = sum(Count))
+
+res_enrichment_v1_v2 <- 
+  outdata %>%  
+  mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
+           as.numeric(gsub(".*\\/", "", GeneRatio)),
+         BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
+           as.numeric(gsub(".*\\/", "", BgRatio)),
+         odds_ratio = GeneFrac / BgFrac)
+
+write_excel_csv(res_enrichment_v1_v2, "results/Comparison_v1_v2/enrichment.csv")
+
+```
+
+## ORA - test 2 (FINAL)
+
+```{r}
+
+database_tissue <- 
+  final_clustering_data_v1 %>% 
+  filter(dataset_id == "tissue") %>% 
+#  filter(!gene %in% diff_genes_tissue) %>% 
+ # select(-dataset_id) %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, full_annotation, cluster)) %>% 
+  select(-cluster,-dataset_id) %>% 
+  select(term = full_annotation, gene)
+  
+  
+clustering_tissue <- 
+  final_clustering_data_v2 %>% 
+  filter(dataset_id == "tissue")  %>% 
+  #filter(!gene %in% diff_genes_tissue) %>% 
+  select(-dataset_id)  %>% 
+  rename(partition = cluster)
+
+universe_tissue <- clustering_tissue$gene
+
+outdata_tissue <-
+  clustering_tissue %>% 
+  group_by(partition) %>% 
+  do({
+    g_data <- .
+    pull(g_data, gene) %>%
+      enricher(universe = universe_tissue,
+               TERM2GENE = database_tissue, 
+               minGSSize = 10,
+               maxGSSize = Inf,
+               pvalueCutoff = 1,
+               qvalueCutoff = 1) %>%
+      as_tibble()
+  }) %>%
+  ungroup() %>%
+  collect()
+
+outdata_tissue %>% 
+  select(partition,ID,GeneRatio,Count) %>% 
+  group_by(partition) %>% 
+    mutate(n = sum(Count))
+
+res_enrichment_tissue <- 
+  outdata_tissue %>%  
+  mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
+           as.numeric(gsub(".*\\/", "", GeneRatio)),
+         BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
+           as.numeric(gsub(".*\\/", "", BgRatio)),
+         odds_ratio = GeneFrac / BgFrac)
+
+#write_excel_csv(res_enrichment_tissue, "results/Comparison_v1_v2/enrichment_all_20220322.csv")
+
+tissue_label_transfer <- 
+  res_enrichment_tissue %>% 
+  left_join(cluster_annotation %>% 
+              select(cluster, ID = full_annotation, Specificity)) %>% 
+ # mutate(partition = factor(partition, levels = plot_order$cluster),
+ #        ID = factor(ID, levels = plot_order$ID)) %>% 
+  filter(GeneFrac > 0.5) %>% 
+  select(partition, cluster) %>% 
+  rename(new_cluster = partition,
+         old_cluster = cluster) %>% 
+  mutate(new_cluster = as.character(new_cluster)) %>% 
+  arrange(as.numeric(new_cluster)) %>% 
+  mutate(dataset_id = "tissue") %>% 
+  select(dataset_id, new_cluster, old_cluster)
+
+#write_tsv(tissue_label_transfer, paste(file_structure_v2$tissue$main, "label_transfer.tsv", sep ="/"))
+
+
+```
+
+## Bubble plot
+
+```{r}
+  enrichment_data <- 
+    outdata %>%  
+    mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
+             as.numeric(gsub(".*\\/", "", GeneRatio)),
+           BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
+             as.numeric(gsub(".*\\/", "", BgRatio)),
+           odds_ratio = GeneFrac / BgFrac) 
+  
+  plot_data <-
+    enrichment_data %>%
+    mutate(cluster = as.character(partition),
+           ID = as.character(ID)) %>% 
+    select(-partition) %>% 
+    #left_join(cluster_annotation %>%
+     #           select(dataset_id, cluster, full_annotation)) %>%
+  #  select(-Description) %>% 
+   # rename(Description = full_annotation) %>% 
+    # left_join(cluster_annotation %>% 
+    #             select(dataset_id, cluster, full_annotation)) %>%
+  #unite(cluster, cluster, Description) %>% 
+    #  unite(ID, id, ID, Description) %>% 
+    select(cluster, ID, odds_ratio) %>% 
+    group_by_all() %>% 
+    mutate(capped_odds_ratio = min(c(odds_ratio,
+                                     50))) %>% 
+    ungroup() 
+  
+  cluster_levels <- 
+    clustering %>% 
+    select(partition) %>% 
+    distinct() #%>% 
+    #arrange(dataset_id, as.numeric(cluster)) %>% 
+    #left_join(cluster_annotation %>% 
+     #           select(dataset_id, cluster, full_annotation), sep = " ") %>% 
+    #unite(cluster,cluster, full_annotation)
+  
+  plot_size_range <- c(1, 4)
+  
+  plot_legend_settings <- 
+    tibble(odds_ratio_str = c(1, 10, 20, 30, 40, ">50"),
+           y = 1:6,
+           odds_ratio = c(1, 10, 20, 30, 40, 50)) 
+  
+  plot_legend <-
+    plot_legend_settings %>% 
+    ggplot(aes(1, y, 
+               size = odds_ratio,
+               fill = odds_ratio,
+               label = odds_ratio_str)) +
+    geom_point(shape = 21,
+               show.legend = F) +
+    geom_text(size = 4, 
+              hjust = 0,
+              nudge_x = 0.1) +
+    annotate("text", x = 1, y = 7, label = "Odds ratio",
+             fontface = "bold", hjust = 0) +
+    scale_x_continuous(limits = c(0, 2)) +
+    scale_y_continuous(limits = c(0, 7)) +
+    scale_fill_gradient(name = "Odds ratio",
+                        low = "white", high = "orangered",
+                        breaks = plot_legend_settings$odds_ratio,
+                        limits = range(plot_legend_settings$odds_ratio)) + 
+    scale_size_continuous(name = "Odds ratio", 
+                          range = plot_size_range, 
+                          breaks = plot_legend_settings$odds_ratio,
+                          limits = range(plot_legend_settings$odds_ratio)) +
+    theme_void()
+  
+ 
+  plot_clustering <- 
+    plot_data %>% 
+    #filter(dataset_id == "singlecell") %>% 
+    select(cluster, ID, odds_ratio) %>% 
+    spread(ID, odds_ratio, fill = 0) %>% 
+    column_to_rownames("cluster") %>%
+    list(terms = t(.), 
+         cluster = .) %>%
+    map(. %>% 
+          dist(method = "binary") %>% 
+          hclust(method = "ward.D2"))
+
+  
+  plot_order <- 
+    list(cluster = unique(c(with(plot_clustering$cluster,
+                                 labels[order]),
+                            cluster_levels$partition)),
+         ID = unique(c(with(plot_clustering$terms,
+                                 labels[order]),
+                            unique(database$term))))
+  
+         ID = with(plot_clustering$terms,
+                   labels[order]))
+  
+  
+   plot <-
+  plot_data %>%
+    ungroup() %>% 
+   # filter(dataset_id == "singlecell") %>% 
+    # mutate(cluster = factor(cluster,
+    #                         plot_order$cluster),
+    #        ID = factor(ID,
+    #                    plot_order$ID)) %>%
+    ggplot(aes(ID, cluster, 
+               size = capped_odds_ratio, 
+               fill = capped_odds_ratio)) +
+    geom_point(data = expand_grid(cluster = plot_order$cluster,
+                                  ID = plot_order$ID) %>%
+                mutate(cluster = factor(cluster, unique(cluster)),
+                     ID = factor(ID, unique(ID))),
+               fill = NA,
+               size = NA) +
+    geom_point(shape = 21,
+               show.legend = F) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust = 0.5, size = 6),
+          legend.position = "right",
+          axis.text.y = element_text(size = 6)) +
+    # coord_fixed() +
+    scale_fill_gradient(name = "Odds ratio",
+                        low = "white", high = "orangered",
+                        breaks = plot_legend_settings$odds_ratio,
+                        limits = range(plot_legend_settings$odds_ratio)) + 
+    scale_size_continuous(name = "Odds ratio", 
+                          range = plot_size_range, 
+                          breaks = plot_legend_settings$odds_ratio,
+                          limits = range(plot_legend_settings$odds_ratio)) +
+    theme(axis.title = element_blank()) + 
+    #coord_fixed() +
+    coord_flip()#+
+  
+  
+     ggsave(savepath("Buble_heatmap_v1-v2_2.pdf"),
+       plot = plot,
+      width = 10, height = 10)
+}
+
+plot_legend
+ggsave(savepath("plot_legend.pdf"))
+
+```
+
+## Barplot
+
+```{r}
+sp_colors <-
+  read_tsv("data/tissue_sc_cluster_colors.tsv")
+
+ cluster_levels <- 
+    clustering_tissue %>% 
+    select(partition) %>% 
+    distinct()
+
+plot_data <-
+    res_enrichment_tissue %>%
+    mutate(cluster = as.character(partition),
+           ID = as.character(ID)) %>% 
+    select(-partition) %>%
+    select(cluster, ID, odds_ratio) %>% 
+    group_by_all() %>% 
+    mutate(capped_odds_ratio = min(c(odds_ratio,
+                                     50))) %>% 
+    ungroup() 
+  
+plot_clustering <- 
+    plot_data %>% 
+    #filter(dataset_id == "singlecell") %>% 
+    select(cluster, ID, odds_ratio) %>% 
+    spread(ID, odds_ratio, fill = 0) %>% 
+    column_to_rownames("cluster") %>%
+    list(terms = t(.), 
+         cluster = .) %>%
+    map(. %>% 
+          dist(method = "binary") %>% 
+          hclust(method = "ward.D2"))
+
+  
+plot_order <- 
+    list(cluster = unique(c(with(plot_clustering$cluster,
+                                 labels[order]),
+                            cluster_levels$partition)),
+         ID = unique(c(with(plot_clustering$terms,
+                                 labels[order]),
+                            unique(database_tissue$term))))
+  
+       
+pal <- 
+  sp_colors %>% 
+  filter(dataset_id == "tissue") %>% 
+  mutate(a = paste (cluster, full_annotation, sep = " - ")) %>% 
+  select(a,color) %>% 
+  deframe()
+#elect()
+
+res_enrichment_tissue %>% 
+  left_join(clustering_tissue %>% 
+  group_by(partition) %>% 
+  summarise(n_genes = n_distinct(gene))) %>% 
+  ungroup() %>% 
+  group_by(partition) %>% 
+  mutate(n_2 = sum(Count))
+
+
+plot <- 
+  res_enrichment_tissue %>% 
+  left_join(cluster_annotation %>% 
+              select(cluster, ID = full_annotation)) %>% 
+  mutate(partition = factor(partition, levels = sort(unique(as.numeric(partition))))) %>% 
+ # mutate(partition = factor(partition, levels = plot_order$cluster),
+  #       ID = factor(ID, levels = plot_order$ID)) %>% 
+ # arrange(cluster) %>% 
+  #filter(partition == "1") %>% 
+  ggplot(aes(x = partition, y = GeneFrac, group = ID, fill = ID)) +
+  geom_bar(position = "stack", stat = "identity", show.legend = F, color = "white", size = 0.2
+           ) +
+  coord_flip() +
+  geom_text(aes(label = cluster), 
+            data =. %>% filter(GeneFrac > 0.3), 
+            size = 2, color = "white", 
+            position = position_stack(vjust = 0.5))+
+  scale_fill_manual(values = pal) +
+  theme_simple +
+  xlab("New tissue clusters")
+
+annot <- 
+  res_enrichment_tissue %>% 
+  left_join(cluster_annotation %>% 
+              select(cluster, ID = full_annotation, Specificity)) %>% 
+ mutate(partition = factor(partition, levels = sort(unique(as.numeric(partition))))) %>% 
+  #mutate(partition = factor(partition, levels = plot_order$cluster),
+   #      ID = factor(ID, levels = plot_order$ID)) %>% 
+  group_by(partition) %>% 
+  top_n(wt = GeneFrac, n = 1) %>% 
+  #filter(GeneFrac >0.5) %>% 
+  mutate(value = -1,
+         Specificity = case_when(GeneFrac < 0.3 ~ "NO",
+                                 TRUE ~ Specificity)) %>% 
+ # arrange(cluster) %>% 
+  #filter(partition == "1") %>% 
+  ggplot(aes(x = partition, y = value)) +
+  geom_bar(position = "stack", stat = "identity", show.legend = F, fill = "white", color = "white", size = 0.2) +
+  coord_flip() +
+  geom_text(aes(label = Description, color = Specificity), data =. %>% filter(GeneFrac > 0.5), size = 2, 
+           # vjust = 1,
+            hjust= 0,
+            show.legend = F)+
+  scale_color_manual(values = c(sp_colors %>% 
+                      filter(dataset_id == "tissue") %>% 
+                      select(Specificity, color) %>% 
+                      deframe(), "NO" = "white")) +
+  #theme(text = element_text(hjust = 0)) +
+  theme_void() +
+  ggtitle ("   Old tissue cluster") +
+  theme(plot.title = element_text(hjust = 0,  size = 9))
+
+
+pal <- 
+  colorRampPalette(c("white", "#245DAB"))(5) %>% 
+  enframe() %>% 
+  mutate(name = c("NO", "Very low", "Low", "Medium", "High")) %>% 
+  deframe()
+
+rel <- 
+  res_enrichment_tissue %>% 
+  left_join(cluster_annotation %>% 
+              select(cluster, ID = full_annotation, reliability)) %>% 
+  mutate(partition = factor(partition, levels = sort(unique(as.numeric(partition))))) %>% 
+ # mutate(partition = factor(partition, levels = plot_order$cluster),
+  #       ID = factor(ID, levels = plot_order$ID)) %>% 
+  group_by(partition) %>% 
+  top_n(wt = GeneFrac, n = 1) %>% 
+  #filter(GeneFrac >0.5) %>% 
+  mutate(value = -1,
+         reliability = case_when(GeneFrac < 0.5 ~ "NO",
+                                 TRUE ~ reliability)) %>% 
+  ggplot(aes(x = partition, y = value, color = reliability)) +
+  geom_bar( stat = "identity", show.legend = F, fill = "white", color ="white", size = 0.2) +
+  coord_flip() +
+  geom_text(aes(label = reliability, color = reliability), 
+            #color = "black",
+            data =. %>% filter(GeneFrac > 0.3), size = 2, 
+           # vjust = 1,
+            hjust= 0,
+            show.legend = F)+
+  scale_color_manual(values = pal) +
+  #theme(text = element_text(hjust = 0)) +
+  theme_void() +
+  ggtitle ("Reliability") +
+  #scale_y_continuous(c(-1,-0.5))+
+  theme(plot.title = element_text(hjust = 0,  size = 9))
+
+plot | annot | rel
+
+
+reliability <- 
+  res_enrichment_tissue %>% 
+  left_join(cluster_annotation %>% 
+              select(cluster, ID = full_annotation, Specificity, reliability)) %>% 
+  mutate(partition = factor(partition, levels = plot_order$cluster),
+         ID = factor(ID, levels = plot_order$ID)) %>% 
+  group_by(partition) %>% 
+  top_n(wt = GeneFrac, n = 1) %>% 
+  #filter(GeneFrac >0.5) %>% 
+  mutate(value = -1,
+         value_2 = 1,
+         reliability = case_when(GeneFrac < 0.3 ~ "NO",
+                                 TRUE ~ reliability)) %>% 
+  ggplot(aes(y = partition, x = value, fill = reliability)) +
+ # geom_bar(position = "stack", stat = "identity", show.legend = F, fill = "white", color = "white", size = 0.2)
+  geom_tile() +
+ # coord_flip() +
+  coord_fixed(ratio=1)+
+   # theme(aspect.ratio = 1)+
+  # geom_text(aes(x = value_2, 
+  #               y = partition,
+  #               label = Description, color = Specificity), data =. %>% filter(GeneFrac > 0.5), size = 2, 
+  #           vjust = 1,
+  #         #  hjust= 0,
+  #           show.legend = F)+
+  scale_fill_manual(values = pal) +
+  #theme(text = element_text(hjust = 0)) +
+  theme_void() +
+    
+  ggtitle ("Reliability") +
+  theme(plot.title = element_text(hjust = 0,  size = 9),
+        legend.position = "top")
+
+#ggsave("results/Comparison_v1_v2/barplot_overlap_2.pdf",
+ #      heigh = 10, width = 3)
+
+plot | annot | reliability
+
+ggsave("results/Comparison_v1_v2/tissue_barplot_overlap_cluster_order.pdf",
+       heigh = 10, width = 5)
+
+ggsave("results/Comparison_v1_v2/tissue_barplot_overlap_old_annotation.pdf",
+       heigh = 10, width = )
+
+
+dat <- res_enrichment_v1_v2 %>%
+ # mutate(partition = factor(partition, levels = plot_order$cluster),
+         ID = factor(ID, levels = plot_order$ID)) %>% 
+  group_by(partition) %>% 
+  top_n(wt = GeneFrac, n = 1) %>%
+  arrange(ID) 
+
+dat %>%
+ # mutate(partition = factor(partition, levels = dat$partition)) %>% 
+  ggplot(aes(partition,GeneFrac,fill=ID, group=ID))+
+  geom_bar(stat="identity",show.legend = F) +
+  coord_flip() +
+  scale_fill_manual(values = pal) +
+  theme_simple
+
+
+############
+legend <- 
+  res_enrichment_v1_v2 %>% 
+    
+  mutate(partition = factor(partition, levels = plot_order$cluster),
+         ID = factor(ID, levels = plot_order$ID)) %>% 
+  #filter(partition == "1") %>% 
+  ggplot(aes(x = partition, y = GeneFrac, group = ID, fill = ID)) +
+  geom_bar(position = "stack", stat = "identity") +
+  coord_flip() +
+  scale_fill_manual(values = pal) +
+  theme_simple
+
+diff_genes_tissue
+```
+
+## Brain
+
+### ORA - test 2 
+
+```{r}
+
+database_brain <- 
+  final_clustering_data_v1 %>% 
+  filter(dataset_id == "brain") %>% 
+#  filter(!gene %in% diff_genes_tissue) %>% 
+ # select(-dataset_id) %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, full_annotation, cluster)) %>% 
+  select(-cluster,-dataset_id) %>% 
+  select(term = full_annotation, gene)
+  
+  
+clustering_brain <- 
+  final_clustering_data_v2 %>% 
+  filter(dataset_id == "brain")  %>% 
+  #filter(!gene %in% diff_genes_tissue) %>% 
+  select(-dataset_id)  %>% 
+  rename(partition = cluster)
+
+universe_brain <- clustering_brain$gene
+
+library(clusterProfiler)
+outdata_brain <-
+  clustering_brain %>% 
+  group_by(partition) %>% 
+  do({
+    g_data <- .
+    pull(g_data, gene) %>%
+      enricher(universe = universe_brain,
+               TERM2GENE = database_brain, 
+               minGSSize = 10,
+               maxGSSize = Inf,
+               pvalueCutoff = 1,
+               qvalueCutoff = 1) %>%
+      as_tibble()
+  }) %>%
+  ungroup() %>%
+  collect()
+
+outdata %>% 
+  select(partition,ID,GeneRatio,Count) %>% 
+  group_by(partition) %>% 
+    mutate(n = sum(Count))
+
+res_enrichment_brain <- 
+  outdata_brain %>%  
+  mutate(GeneFrac = as.numeric(gsub("\\/.*", "", GeneRatio)) /
+           as.numeric(gsub(".*\\/", "", GeneRatio)),
+         BgFrac = as.numeric(gsub("\\/.*", "", BgRatio)) /
+           as.numeric(gsub(".*\\/", "", BgRatio)),
+         odds_ratio = GeneFrac / BgFrac)
+
+#write_excel_csv(res_enrichment_v1_v2, "results/Comparison_v1_v2/enrichment_all.csv")
+
+```
+
+
+### Braplot
+
+```{r}
+
+brain_specificities <- 
+  cluster_annotation %>% 
+  filter(dataset_id == "brain") %>% 
+  pull(Specificity) %>% 
+  unique() 
+
+brain_colors <- 
+  all_HPA_colors %>% 
+  mutate(tissue_name = str_to_sentence(tissue_name)) %>% 
+  filter(tissue_name %in% brain_specificities) %>% 
+  select(-organ_name) %>% 
+  deframe()
+
+umap_data_v1 %>% 
+  filter(dataset_id == "brain") %>% 
+  left_join(final_clustering_data_v1 %>% 
+              filter(dataset_id == "brain")) %>% 
+  left_join(cluster_annotation %>% 
+               filter(dataset_id == "brain") %>% 
+              select(dataset_id, cluster, Specificity, Function, full_annotation)) %>% 
+  ggplot(aes(UMAP_1_scaled,UMAP_2_scaled, color = Specificity)) +
+  geom_point(size = 0.5) +
+ # scale_color_manual(values = brain_colors) +
+  theme_void()
+
+
+ggsave(savepath("brain_sp.png"))
+
+
+
+ cluster_levels <- 
+    clustering_brain %>% 
+    select(partition) %>% 
+    distinct()
+
+plot_data <-
+    res_enrichment_brain %>%
+    mutate(cluster = as.character(partition),
+           ID = as.character(ID)) %>% 
+    select(-partition) %>%
+    select(cluster, ID, odds_ratio) %>% 
+    group_by_all() %>% 
+    mutate(capped_odds_ratio = min(c(odds_ratio,
+                                     50))) %>% 
+    ungroup() 
+  
+plot_clustering <- 
+    plot_data %>% 
+    #filter(dataset_id == "singlecell") %>% 
+    select(cluster, ID, odds_ratio) %>% 
+    spread(ID, odds_ratio, fill = 0) %>% 
+    column_to_rownames("cluster") %>%
+    list(terms = t(.), 
+         cluster = .) %>%
+    map(. %>% 
+          dist(method = "binary") %>% 
+          hclust(method = "ward.D2"))
+
+  
+plot_order <- 
+    list(cluster = unique(c(with(plot_clustering$cluster,
+                                 labels[order]),
+                            cluster_levels$partition)),
+         ID = unique(c(with(plot_clustering$terms,
+                                 labels[order]),
+                            unique(database$term))))
+  
+       
+# pal <- 
+#   sp_colors %>% 
+#   filter(dataset_id == "tissue") %>% 
+#   mutate(a = paste (cluster, full_annotation, sep = " - ")) %>% 
+#   select(a,color) %>% 
+#   deframe()
+# #elect()
+
+res_enrichment_brain %>% 
+  left_join(clustering_brain %>% 
+  group_by(partition) %>% 
+  summarise(n_genes = n_distinct(gene))) %>% 
+  ungroup() %>% 
+  group_by(partition) %>% 
+  mutate(n_2 = sum(Count))
+
+pal <- 
+  cluster_annotation %>% 
+  filter(dataset_id == "brain") %>% 
+  select(Specificity) %>%
+  distinct() %>% 
+  mutate(color = colorRampPalette(ggthemes::tableau_color_pal(palette = "Classic Cyclic")(10))(10))%>%
+  mutate(color = case_when(Specificity == "Non-specific" ~ "grey",
+                           TRUE ~ color)) %>% 
+  deframe()
+
+res_enrichment_brain %>% 
+  left_join(cluster_annotation %>% 
+              select(cluster, ID = full_annotation, Specificity)) %>% 
+  mutate(partition = factor(partition, levels = plot_order$cluster),
+         ID = factor(ID, levels = plot_order$ID)) %>% 
+ # arrange(cluster) %>% 
+  #filter(partition == "1") %>% 
+  ggplot(aes(x = partition, y = GeneFrac, group = ID, fill = Specificity)) +
+  geom_bar(position = "stack", stat = "identity",  color = "white", size = 0.2
+           ) +
+  coord_flip() +
+  geom_text(aes(label = cluster), data =. %>% filter(GeneFrac > 0.5), size = 2, color = "white")+
+  scale_fill_manual(values = pal) +
+  theme_simple +
+  theme(legend.position = "top")
+
+ggsave("results/Comparison_v1_v2/barplot_overlap_brain_3.pdf",
+       heigh = 11, width = 7)
+
+
+brain_label_transfer <- 
+  res_enrichment_brain %>% 
+  left_join(cluster_annotation %>% 
+              select(cluster, ID = full_annotation, Specificity)) %>% 
+  mutate(partition = factor(partition, levels = plot_order$cluster),
+         ID = factor(ID, levels = plot_order$ID)) %>% 
+  filter(GeneFrac > 0.5) %>% 
+  select(partition, cluster) %>% 
+  rename(new_cluster = partition,
+         old_cluster = cluster) %>% 
+  mutate(new_cluster = as.character(new_cluster)) %>% 
+  arrange(as.numeric(new_cluster)) %>% 
+  mutate(dataset_id = "brain") %>% 
+  select(dataset_id, new_cluster, old_cluster)
+
+write_tsv(brain_label_transfer, paste(file_structure_v2$brain$main, "label_transfer.tsv", sep ="/"))
+
+dat <- res_enrichment_v1_v2 %>%
+ # mutate(partition = factor(partition, levels = plot_order$cluster),
+         ID = factor(ID, levels = plot_order$ID)) %>% 
+  group_by(partition) %>% 
+  top_n(wt = GeneFrac, n = 1) %>%
+  arrange(ID) 
+
+dat %>%
+ # mutate(partition = factor(partition, levels = dat$partition)) %>% 
+  ggplot(aes(partition,GeneFrac,fill=ID, group=ID))+
+  geom_bar(stat="identity",show.legend = F) +
+  coord_flip() +
+  scale_fill_manual(values = pal) +
+  theme_simple
+
+
+############
+legend <- 
+  res_enrichment_v1_v2 %>% 
+    
+  mutate(partition = factor(partition, levels = plot_order$cluster),
+         ID = factor(ID, levels = plot_order$ID)) %>% 
+  #filter(partition == "1") %>% 
+  ggplot(aes(x = partition, y = GeneFrac, group = ID, fill = ID)) +
+  geom_bar(position = "stack", stat = "identity") +
+  coord_flip() +
+  scale_fill_manual(values = pal) +
+  theme_simple
+
+diff_genes_tissue
+```
+
+# Compare tissue UMAP
+## Tissue specificity UMAP
+
+```{r}
+
+sp_colors <-
+  read_tsv("data/tissue_sc_cluster_colors.tsv")
+
+gene_color <- 
+  final_clustering_data_v1 %>% 
+  filter(dataset_id == "tissue") %>% 
+  left_join(sp_colors %>% 
+              mutate(cluster = as.character(cluster))) %>% 
+  select(gene,color)
+
+umap_data_v1 %>% 
+  filter(dataset_id=="tissue") %>% 
+  mutate(version = "HPA-v1") %>% 
+  bind_rows(umap_data_v2 %>% 
+              filter(dataset_id=="tissue") %>% 
+              mutate(version = "HPA-v2")) %>% 
+  left_join(gene_color) %>% 
+  ggplot(aes(UMAP_1_scaled,UMAP_2_scaled,color=color)) +
+  geom_point(size = 0.5, alpha = 0.8)+
+  theme_void()+
+  facet_wrap(~version) +
+  scale_color_identity()
+
+ggsave("results/Comparison_v1_v2/gene_specificity.pdf")
+
+```
+
+## Polygons
+
+```{r}
+
+umap_polygons_v1 %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X,Y, group = polygon_id, fill = as.factor(cluster))) +
+  geom_polygon(show.legend = F,
+               color = "black") +
+  theme_bw() +
+  theme_void()
+ # geom_point(data = all_cluster_centers, aes(x, y), inherit.aes = F, size = 1) +
+  coord_fixed()
+
+pol_1 <- 
+  umap_polygons_v1 %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X,Y, group = polygon_id, fill = as.factor(cluster))) +
+  geom_polygon(show.legend = F,
+               color = "black", alpha = 0.6) +
+  theme_bw() +
+  theme_void() +
+  geom_text(data = umap_centers_v1 %>% 
+               filter(dataset_id == "tissue"), aes(x, y, label = cluster), 
+            size = 3,
+            inherit.aes = F, size = 1) +
+   # geom_point(data = umap_centers_v2 %>% 
+   #             filter(dataset_id == "tissue"), aes(x, y), inherit.aes = F, size = 1) +
+  coord_fixed()+
+    ggtitle("HPA-v1")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+pol_2 <- 
+  umap_polygons_v2 %>% 
+  filter(dataset_id == "tissue") %>% 
+  ggplot(aes(X,Y, group = polygon_id, fill = as.factor(cluster))) +
+  geom_polygon(show.legend = F,
+               color = "black", alpha = 0.6) +
+  theme_bw() +
+  theme_void() +
+  geom_text(data = umap_centers_v2 %>% 
+               filter(dataset_id == "tissue"), aes(x, y, label = cluster), 
+            size = 3,
+            inherit.aes = F, size = 1) +
+   # geom_point(data = umap_centers_v2 %>% 
+   #             filter(dataset_id == "tissue"), aes(x, y), inherit.aes = F, size = 1) +
+  coord_fixed()+
+    ggtitle("HPA-v2") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+  pol_1 + pol_2
+
+  ggsave("results/Comparison_v1_v2/POL_V1_V2.pdf")
+  
+  umap_polygons_v1 %>% 
+  group_by(cluster) %>% 
+  summarise(n=n_distinct(sub_cluster)) %>% 
+  arrange(-n) %>% 
+  filter(n>1)
+
+umap_polygons_v2 %>% 
+  group_by(cluster) %>% 
+  summarise(n=n_distinct(sub_cluster)) %>% 
+  arrange(-n) %>% 
+  filter(n >1)
+
+```
+
+## Transfer most significant labels
+
+```{r}
+pal
+
+dat <- 
+  res_enrichment_v1_v2 %>%
+  group_by(partition) %>% 
+  top_n(wt = GeneFrac, n = 1) %>%
+  arrange(ID) %>% 
+  rename(cluster = partition, 
+         annotation = ID) %>% 
+  select(cluster, annotation)
+
+new_annot <- 
+  final_clustering_data_v2 %>% 
+  filter(dataset_id == "tissue") %>% 
+  left_join(dat) %>% 
+  left_join(cluster_annotation %>% 
+  filter(dataset_id == "tissue") %>% 
+  select(annotation = full_annotation, Specificity, Function)) %>% 
+  mutate(new_annotation = paste(Specificity, Function, sep =   " - "))
+
+
+
+pal_dark <- 
+  pal %>% 
+  enframe() %>% 
+  group_by_all %>% 
+  mutate(value = ramp_color_bias(value, "black", bias = 0.4)) %>% 
+  deframe()
+
+
+umap_data_v2 %>%
+  filter(dataset_id == "tissue") %>% 
+  left_join(final_clustering_data_v2 %>% 
+              filter(dataset_id == "tissue")) %>% 
+  left_join(new_annot) %>% 
+ # filter(dataset_id == "tissue") %>% 
+#  mutate(Specificity = str_to_title(Specificity)) %>% 
+  ggplot(aes(UMAP_1_scaled, UMAP_2_scaled)) +
+  geom_point(show.legend = F, color = "grey80", size = 0.05) + 
+  theme_void() +
+  coord_fixed() +
+  geom_polygon(data = umap_polygons_v2 %>% 
+                 mutate(cluster = as.character(cluster)) %>% 
+                 left_join(new_annot) %>%
+                # mutate(Specificity = str_to_title(Specificity)) %>% 
+                 filter(dataset_id == "tissue") ,
+               aes(X,Y, group = paste(cluster, sub_cluster, landmass), 
+                   fill = annotation, 
+                   color = annotation),
+               alpha = 0.7,
+               show.legend = F)+ 
+  scale_fill_manual(values = pal %>%  sort()) +
+  geom_point(data = umap_centers_v2 %>%
+               mutate(cluster = as.character(cluster)) %>%
+               filter(dataset_id == "tissue") %>% 
+               inner_join(new_annot),
+                            #mutate(Specificity = str_to_title(Specificity))),
+             inherit.aes = F, aes(x,y, color = annotation),
+             size = 4.5,
+             stroke= 0.8,
+             show.legend = F) +
+  geom_text(data = umap_centers_v2 %>%
+              mutate(cluster = as.character(cluster)) %>%
+              filter(dataset_id == "tissue"),
+            inherit.aes = F, aes(x,y, label = cluster),
+            color = "white") +
+  geom_text(data = umap_centers_v2 %>% 
+              mutate(cluster = as.character(cluster)) %>% 
+              left_join(new_annot) %>% 
+              select(-gene) %>% 
+              filter(dataset_id == "tissue") %>% 
+              distinct(),
+            aes(x, y, label = new_annotation), 
+            size = 2,
+            inherit.aes = F,
+            show.legend = F) +
+  scale_color_manual(values = pal_dark) 
+
+ggsave(("results/Comparison_v1_v2/label_transfer.pdf"))
+```
+
+
+# Brain clustering
+
+```{r}
+
+```
+
+# Load membership data
+
+```{r}
+
+memberships <- 
+  file_structure_v2 %>% 
+  map(function(x) x$clustering) %>% 
+  map(function(x) {
+    file_ <- paste(x, "cluster_memberships.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") #%>% 
+  #mutate(cluster = as.character(cluster)) 
+
+memberships %>% 
+  filter(is.na(cluster)) %>% 
+  pull(gene) %>% 
+  unique()
+
+memberships %>% 
+  na.omit()
+
+
+
+
+memberships_old <- 
+  file_structure_v1 %>% 
+  map(function(x) x$clustering) %>% 
+  map(function(x) {
+    file_ <- paste(x, "cluster_memberships.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") #%>% 
+
+memberships_old %>% 
+  filter(dataset_id =="tissue") %>% 
+  na.omit()
+
+memberships %>% 
+  filter(dataset_id =="celline")
+
+
+############## 
+
+
+
+old_memberships <-read_tsv("results/Clustering_results/tissue_HPAv2/clustering/old_tissue_clustering_folder_20220321/cluster_memberships.tsv") 
+new_memberships <- read_tsv("results/Clustering_results/tissue_HPAv2/clustering/cluster_memberships.tsv")
+
+old_clustering <-read_tsv("results/Clustering_results/tissue_HPA21v2/clustering/old_tissue_clustering_folder_20220321/final_consensus.tsv") 
+new_clustering <- read_tsv("results/Clustering_results/tissue_HPA21v2/clustering/final_consensus.tsv")
+
+identical(old_clustering, new_clustering)
+
+old_clustering %>% 
+  left_join(new_clustering %>% 
+            rename(new_cluster = cluster)) %>% 
+  mutate(dif = as.numeric(cluster) - as.numeric(new_cluster)) %>% 
+  arrange(-dif)
+
+```
+
+
+# Load membership data
+
+```{r}
+
+memberships <- 
+  file_structure %>% 
+  map(function(x) x$clustering) %>% 
+  map(function(x) {
+    file_ <- paste(x, "cluster_memberships.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") #%>% 
+  #mutate(cluster = as.character(cluster)) 
+
+membership %>% 
+  filter(is.na(cluster)) %>% 
+  pull(gene) %>% 
+  unique()
+
+memberships %>% 
+  filter(dataset_id =="tissue") %>% 
+  na.omit()
+
+
+
+
+memberships_old <- 
+  file_structure_v1 %>% 
+  map(function(x) x$clustering) %>% 
+  map(function(x) {
+    file_ <- paste(x, "cluster_memberships.tsv", sep = "/")
+    if(file.exists(file_)) {
+      read_tsv(file_)
+    } else {
+      NULL
+    }
+  }) %>% 
+  bind_rows(.id = "dataset_id") #%>% 
+
+memberships_old %>% 
+  filter(dataset_id =="tissue") %>% 
+  na.omit()
+
+memberships %>% 
+  filter(dataset_id =="celline")
+
+
+final_clustering$membership_matrix %>% pull(cluster) %>% unique() %>% length()
+final_clustering$membership_matrix %>% pull(cons_cluster) %>% unique() %>% length()
+final_clustering$membership_matrix %>% filter(cons_cluster == 80) %>% arrange(-membership)
+final_clustering$membership_matrix %>% filter(gene == "ENSG00000004468")
+
+screening_clustering
+
+
+membership %>% 
+  group_by(gene) %>% 
+  top_n(wt=membership, 1) %>% 
+  na.omit() %>% 
+  distinct() %>% 
+  mutate(n = n_distinct(cluster)) %>% 
+  arrange(-n, membership, gene)
+
+
+genes_tissue <- 
+  all_clusters_consensus %>% 
+  filter(dataset_id =="tissue") %>% pull(gene) %>% unique() 
+```

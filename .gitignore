@@ -5,6 +5,7 @@
 scripts/file structure test.R
 scripts/IHC investigation.R
 scripts/MI_testing.R
+.RData
 scripts/treemap_testing.R
 scripts/predict_resolution_range_test.R
 treemap.RData
@@ -12,3 +13,9 @@ treemap.RData
 .Rhistory
 .RData
 
+*.RData
+scripts/single_cell_comparison_v1_v2.R
+scripts/compare_UMAPs.R
+scripts/test_UMAP.R
+run_settings/file_structure.rds
+*.rds
