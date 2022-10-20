@@ -4,10 +4,10 @@ library(tidyverse)
 
 
 sc_data <- 
-  read_tsv("../../Data/HPA/HPA21_E103_files/single cell/cluster_data.tsv")
+  read_tsv("../../Data/HPA/HPA22_E103_files/single cell/single_cell_cluster_data_v3_103.tsv")
 
 sc_anno <- 
-  read_tsv("../../Data/HPA/HPA21_E103_files/single cell/annotation.tsv")
+  read_tsv("../../Data/HPA/HPA22_E103_files/single cell/single_cell_annotation_v3_103.tsv")
 
 
 sc_data_formatted <-
@@ -20,6 +20,6 @@ sc_data_formatted <-
   select(ensg_id, sample, ntpm)
 
 sc_data_formatted %>% 
-  write_tsv("data/expression_data/HPA21_E103/sc_cluster_data.tsv")
+  write_tsv("data/expression_data/HPA22_E103/sc_cluster_data.tsv")
 
 

@@ -105,32 +105,36 @@ db_terms <- read_tsv("data/database_terms.tsv")
 
 run_settings <- 
   list(num_seeds = 100,
+       # Final resolution is chosen after evaluation:
        final_consensus_resolutions = 
          list("blood" = 4.7,
               "brain" = 6.7, #before 2022-02-10 (HPA-v1)-> 6.1
               "celline" = 1.7,
               "singlecell" = 3.1,
               "tissue" = 6.3), #before 2022-02-10 (HPA-v1)-> 7.3
+       # Resolution limits are chosen by our experience:
        resolution_upper_limit = c("blood" = 14.5,
-                            "brain" = 12.5,
-                            "celline" = 15,
-                            "singlecell" = 20,
-                            "tissue" = 11.1),
+                                  "brain" = 12.5,
+                                  "celline" = 15,
+                                  "singlecell" = 20,
+                                  "tissue" = 11.1),
        resolution_lower_limit = c("blood" = 0.5,
-                            "brain" = 0.5,
-                            "celline" = 0.3,
-                            "singlecell" = 0.5,
-                            "tissue" = 0.5),
+                                  "brain" = 0.5,
+                                  "celline" = 0.3,
+                                  "singlecell" = 0.5,
+                                  "tissue" = 0.5),
+       # Number of neighbors for network construction before community detection:
        n_neighbors = c("blood" = 20,
-                            "brain" = 20,
-                            "celline" = 20,
-                            "singlecell" = 20,
-                            "tissue" = 20),
+                       "brain" = 20,
+                       "celline" = 20,
+                       "singlecell" = 20,
+                       "tissue" = 20),
+       # Pruning of SNN network, default 1/15 jaccard index: 
        pruning = c("blood" = 1/15,
-                            "brain" = 1/15,
-                            "celline" = 1/15,
-                            "singlecell" = 1/20,
-                            "tissue" = 1/15))
+                   "brain" = 1/15,
+                   "celline" = 1/15,
+                   "singlecell" = 1/15,
+                   "tissue" = 1/15))
 
 #saveRDS(run_settings, ".rds")
 
@@ -217,7 +221,7 @@ all_data_cluster <-
   bind_rows(.id = "dataset_id") %>% 
   inner_join(expressed_genes) %>% 
   group_by(dataset_id) %>%    
-   partition(cluster) %>% 
+  partition(cluster) %>% 
   do({
     g_data <- .
 
@@ -238,8 +242,10 @@ all_data_cluster <-
       savefile_neighbors = paste(file_structure[[g_dataset_id]]$graph, "neighbors.rds", sep = "/")
       savefile_data = paste(file_structure[[g_dataset_id]]$data, "data.tsv", sep = "/")
       
+      # Save original data
       write_tsv(g_data, savefile_data)
       
+      # Perform clustering (all steps within wrapper):
       cluster_res <-
         HPA_gene_clustering(g_data,
                             col_value = "tmm",
@@ -340,19 +346,13 @@ all_clusters_consensus <-
       consensus <- 
         g_data %>% 
         group_by(resolution) %>% 
-       # partition(cluster) %>% 
         do({
           dat <- .
-          res <- unique(dat$resolution)
+          # res <- unique(dat$resolution)
           
-          final_clustering <- find_consensus(dat, n = run_settings$num_seeds, get_membership = F, runs = 1)
+          find_consensus(dat, n = run_settings$num_seeds, get_membership = F, runs = 1)
           
-       #   savefile_cluster_res <- paste(file_structure[[g_dataset_id]]$clustering, paste(res, "resolution_consensus.tsv", sep = "_"), sep = "/")
-        #  write_tsv(final_clustering, savefile_cluster_res)
-          
-          final_clustering
         }) %>% 
-       # collect() %>% 
         ungroup()
       
       write_tsv(consensus, savefile_cluster)
@@ -450,8 +450,8 @@ neighbor_data <-
 ```
 
 
-
 ## Read graphs
+
 ```{r}
 
 all_data_graphs <- 
@@ -460,7 +460,10 @@ all_data_graphs <-
   lapply(function(filename_) readRDS(paste(filename_, "neighbors.rds", sep = "/")))
 
 ```
+
+
 ## Generate UMAP
+
 ```{r}
 # Generate UMAP from graph 
 graph_umaps <- 
@@ -589,6 +592,9 @@ t-Sys.time()
 
 
 ## MI
+
+### GO
+
 ```{r Evaluation based on Mutual Information - Gene Ontology}
 
 # Filter GO database
@@ -660,6 +666,8 @@ Sys.time() - t
 
 
 ```
+
+### Reactome
 
 ```{r Evaluation based on Mutual Information - Reactome}
 # Filter reactome database
@@ -1320,13 +1328,13 @@ graph_umaps_hulls <-
       UMAP_hulls <- 
         g_data %$%
         generate_cluster_hulls(V1 = UMAP_1_scaled,
-                       V2 = UMAP_2_scaled, 
-                       element_id = gene,
-                       cluster_membership = cluster, 
-                       n = 1000,
-                       poly_concavity = 2,
-                       poly_smoothing = 1.25,
-                       relative_bandwidth = 1/150)
+                               V2 = UMAP_2_scaled, 
+                               element_id = gene,
+                               cluster_membership = cluster, 
+                               n = 1000,
+                               poly_concavity = 2,
+                               poly_smoothing = 1.25,
+                               relative_bandwidth = 1/150)
       
       
       write_tsv(UMAP_hulls$hulls, savefile_UMAP_polygons)
@@ -1364,76 +1372,4 @@ ggsave(run_id_savename("UMAP scaled hulls.pdf"),
        width = 8, height = 5)
 
 
-# Visualize for 1 dataset
-# UMAP_hulls <- 
-#   g_data %$%
-#   generate_cluster_hulls(V1 = UMAP_1_scaled,
-#                          V2 = UMAP_2_scaled, 
-#                          element_id = gene,
-#                          cluster_membership = cluster, 
-#                          n = 1000,
-#                          poly_concavity = 2,
-#                          poly_smoothing = 1.25,
-#                          relative_bandwidth = 1/150)
-# 
-# 
-# write_tsv(UMAP_hulls$hulls, savefile_UMAP_polygons)
-# saveRDS(UMAP_hulls, savefile_UMAP_hulls)
-# 
-# graph_umaps %>% 
-#   left_join(final_clusterings ) %>% 
-#   filter(dataset_id == "blood") %>% 
-#   ggplot(aes(UMAP_1_scaled, UMAP_2_scaled, color = as.factor(cluster))) +
-#   geom_point() +
-#   coord_fixed() +
-#   theme_void() +
-#   geom_point(data = UMAP_hulls$center_density, aes(x,y), inherit.aes = F) 
-
-
-# Run different parameters
-# hull_settings <- 
-#   expand_grid(dataset_id = unique(umap_plot_data$dataset_id),
-#               relative_bandwidth_i = c(150),
-#               poly_concavity = c(2),
-#               poly_smoothing = c(1.25),
-#               n = 1000) %>% 
-#   mutate(relative_bandwidth = 1 / relative_bandwidth_i,
-#          i = row_number())
-# 
-# 
-# hull_data <- 
-#   pblapply(hull_settings$i,
-#          function(i) {
-#            
-#            plot_data <- 
-#              umap_plot_data %>% 
-#              filter(dataset_id == hull_settings$dataset_id[i])
-#            
-#            generate_cluster_hulls(V1 = plot_data$UMAP_1_scaled,
-#                                   V2 = plot_data$UMAP_2_scaled, 
-#                                   element_id = plot_data$gene,
-#                                   cluster_membership = plot_data$cluster, 
-#                                   n = hull_settings$n[i],
-#                                   poly_concavity = hull_settings$poly_concavity[i],
-#                                   poly_smoothing = hull_settings$poly_smoothing[i],
-#                                   relative_bandwidth = hull_settings$relative_bandwidth[i]) 
-#            
-#          })
 ```
-
-```{r}
-
-# compare -> UMAP_hulls
-
-old <- read_tsv("results/Clustering_results/tissue_HPA21v2/UMAP/old/cluster_centers.tsv")
-new <- read_tsv("results/Clustering_results/tissue_HPA21v2/UMAP/cluster_centers.tsv")
-
-old %>% 
-  full_join(new %>% 
-              rename(x_2 = x,
-                     y_2 = y)) %>% 
-  mutate(a = (x-x_2)+(y-y_2)) %>% 
-  filter(a != 0)
-
-```
-
