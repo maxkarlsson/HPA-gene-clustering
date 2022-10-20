@@ -5,6 +5,6 @@ brain,tissue,consensus_brain_tissues_103.tsv
 brain,region,consensus_brain_103.tsv
 tissue,region,region_aggregated_tissue_103.tsv
 tissue,consensus,consensus_max_of_all_groups_103.tsv
-celline,consensus,proteinatlas_celline_hpa_103.tsv
+celline,consensus,celline_CCLE_data.tsv
 singlecell,sample,sc_cluster_data.tsv
 singlecell,consensus,sc_consensus_data.tsv
