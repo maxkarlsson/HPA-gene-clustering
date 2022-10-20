@@ -20,7 +20,20 @@ cl_data_formatted <-
   summarise(ntpm = mean(ntpm))
 
 
-sc_data_formatted %>% 
+cl_data_consensus_formatted <- 
+  cl_data %>% 
+  select(ensg_id, sample, ntpm) %>% 
+  left_join(cl_anno %>% 
+              select(sample = 1, 
+                     cell_line = `Primary disease`)) %>% 
+  group_by(cell_line, ensg_id) %>% 
+  summarise(ntpm = mean(ntpm))
+
+
+cl_data_formatted %>% 
   write_tsv("data/expression_data/HPA22_E103/celline_CCLE_data.tsv")
+
+cl_data_consensus_formatted %>% 
+  write_tsv("data/expression_data/HPA22_E103/celline_CCLE_data_consensus.tsv")
 
 

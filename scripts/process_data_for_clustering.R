@@ -5,10 +5,10 @@ library(tidyverse)
 
 
 data_path <- 
-  "data/expression_data/HPA21_E103/"
+  "data/expression_data/HPA22_E103/"
 
 dataset_path_file <- 
-  "run_settings/20211108 all_datasets.csv"
+  "run_settings/20221020 all_datasets.csv"
 
 
 dataset_paths <- 
@@ -40,6 +40,9 @@ processing_functions <-
          spread(sample, ntpm),
        tissue_consensus = . %>% 
          select(ensg_id, sample = tissue, ntpm) %>%
+         spread(sample, ntpm),
+       celline_sample = . %>% 
+         select(ensg_id, sample = cell_line, ntpm) %>%
          spread(sample, ntpm),
        celline_consensus = . %>% 
          select(ensg_id, sample = celline, ntpm) %>%

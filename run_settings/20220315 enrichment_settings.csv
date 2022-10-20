@@ -9,9 +9,9 @@ KEGG,KEGG pathways,External,,,
 secretome_location,Secretome location,HPA,ensembl,HPA21_20220222,proteinatlas21_20220222.tsv
 specificity_blood,Specificity classification Blood,HPA,ensembl,HPA21,bloodcells_hpa_category_103.tsv
 specificity_brain,Specificity classification Brain,HPA,ensembl,HPA21,brain_human_regional_category_103v2.tsv
-specificity_singlecell,Specificity classification Single cell type,HPA,ensembl,HPA21,sc_consensus_category_HPA21.tsv
+specificity_singlecell,Specificity classification Single cell type,HPA,ensembl,HPA22,single_cell_category_v3_103.tsv
 specificity_tissue,Specificity classification Tissue,HPA,ensembl,HPA21,consensus_all_category_103v2.tsv
-specificity_celline,Specificity classification Cell line,HPA,ensembl,HPA21,proteinatlas_celline_category_103.tsv
+specificity_celline,Specificity classification Cell line,HPA,ensembl,HPA22,celline_disease_category_hpa_ccle_103.tsv
 subcellular_location,Subcellular location,HPA,ensembl,HPA21,subcellular_location_HPA21.tsv
 panglao_cellmarkers,Cell type markers from the Panglao database,External,gene names,20200327,PanglaoDB_markers_27_Mar_2020.tsv
 protein_class,HPA protein class,HPA,ensembl,HPA21_20220222,proteinatlas21_20220222.tsv

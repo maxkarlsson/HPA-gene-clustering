@@ -95,7 +95,7 @@ GOterms <-
   filter(ensg_id %in% all_genes_in_data)
 
 # Other databases
-db_terms <- read_tsv("data/database_terms.tsv")
+# db_terms <- read_tsv("data/database_terms.tsv")
   
 ```
 
@@ -671,70 +671,70 @@ Sys.time() - t
 
 ```{r Evaluation based on Mutual Information - Reactome}
 # Filter reactome database
-MI_Rterms <- 
-  db_terms %>%
-  filter(id == "reactome") %>% 
-  filter(!is.na(term_id)) %>%
-  distinct() %>% 
-  group_by(term_id) %>% 
-  mutate(n_genes = n_distinct(ensg_id)) %>% 
-  ungroup() %>% 
-  filter(n_genes <= 500, 
-          n_genes >= 10) %>% 
-  select(ensg_id,term_id)
-
-# Prepare cluster for paralellization
-t <- Sys.time()
-worker_cluster <- new_cluster(n = 6)
-cluster_library(worker_cluster, c("dplyr",
-                                  "tidyverse",
-                                  "infotheo"))
-cluster_copy(worker_cluster, c("MI_Rterms",
-                               "calculate_MI_reactome",
-                               "file_structure"))
-
-# Calculate mutual information (rectome database)
-MI_R_consensus <-
-  all_clusters_consensus %>%
-  group_by(dataset_id) %>%
-  partition(worker_cluster) %>%
-  do({
-    g_data <- .
-    
-    g_dataset_id <- 
-      unique(g_data$dataset_id)
-    
-    savefile_MIreactome <- 
-      paste(file_structure[[g_dataset_id]]$evaluation, "MI_reactome.tsv", sep = "/")
-    
-    if(file.exists(savefile_MIreactome)) {
-      MI_scores <-
-        read_tsv(savefile_MIreactome)
-        
-    } else {
-      
-      MI_scores <- 
-        g_data %>% 
-        group_by(resolution) %>% 
-        
-        do({
-          g_data <- .
-          select(g_data, gene, cluster) %>%
-            calculate_MI_reactome(., MI_Rterms, nrep = 300)
-        }) %>% 
-        ungroup()
-      
-      write_tsv(MI_scores, savefile_MIreactome)
-    }
-    
-    MI_scores
-  }) %>%
-  ungroup() %>%
-  collect()
-rm(worker_cluster)
-gc()
-
-Sys.time() - t
+# MI_Rterms <- 
+#   db_terms %>%
+#   filter(id == "reactome") %>% 
+#   filter(!is.na(term_id)) %>%
+#   distinct() %>% 
+#   group_by(term_id) %>% 
+#   mutate(n_genes = n_distinct(ensg_id)) %>% 
+#   ungroup() %>% 
+#   filter(n_genes <= 500, 
+#           n_genes >= 10) %>% 
+#   select(ensg_id,term_id)
+# 
+# # Prepare cluster for paralellization
+# t <- Sys.time()
+# worker_cluster <- new_cluster(n = 6)
+# cluster_library(worker_cluster, c("dplyr",
+#                                   "tidyverse",
+#                                   "infotheo"))
+# cluster_copy(worker_cluster, c("MI_Rterms",
+#                                "calculate_MI_reactome",
+#                                "file_structure"))
+# 
+# # Calculate mutual information (rectome database)
+# MI_R_consensus <-
+#   all_clusters_consensus %>%
+#   group_by(dataset_id) %>%
+#   partition(worker_cluster) %>%
+#   do({
+#     g_data <- .
+#     
+#     g_dataset_id <- 
+#       unique(g_data$dataset_id)
+#     
+#     savefile_MIreactome <- 
+#       paste(file_structure[[g_dataset_id]]$evaluation, "MI_reactome.tsv", sep = "/")
+#     
+#     if(file.exists(savefile_MIreactome)) {
+#       MI_scores <-
+#         read_tsv(savefile_MIreactome)
+#         
+#     } else {
+#       
+#       MI_scores <- 
+#         g_data %>% 
+#         group_by(resolution) %>% 
+#         
+#         do({
+#           g_data <- .
+#           select(g_data, gene, cluster) %>%
+#             calculate_MI_reactome(., MI_Rterms, nrep = 300)
+#         }) %>% 
+#         ungroup()
+#       
+#       write_tsv(MI_scores, savefile_MIreactome)
+#     }
+#     
+#     MI_scores
+#   }) %>%
+#   ungroup() %>%
+#   collect()
+# rm(worker_cluster)
+# gc()
+# 
+# Sys.time() - t
 
 ```
 
