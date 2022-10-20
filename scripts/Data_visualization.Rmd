@@ -68,6 +68,7 @@ file_structure <-
                           folders = c("data" = "data", 
                                       "svg" = "svg",
                                       "UMAP" = "UMAP",
+                                      "PCA" = "PCA",
                                       "treemap" = "svg/treemap",
                                       "heatmap" = "svg/heatmap",
                                       "distance" = "distance",
@@ -152,6 +153,19 @@ cluster_annotation <-
 ## Load UMAP data 
 
 ```{r}
+pca_data <- 
+  file_structure %>% 
+  map(function(x) x$PCA) %>% 
+  map(function(x) {
+    file_ <- paste(x, "PCA.rds", sep = "/")
+    if(file.exists(file_)) {
+      readRDS(file_)
+    } else {
+      NULL
+    }
+  }) 
+
+
 umap_data <- 
   file_structure %>% 
   map(function(x) x$UMAP) %>% 
@@ -3494,6 +3508,45 @@ edge_data %>%
 
 ```
 
+## UMAP point plot
+
+```{r}
+
+plot_data <- 
+  umap_data %>% 
+  filter(dataset_id == "singlecell") %>% 
+  left_join(clustering_data)
+
+plot_umap_poly_centers <- 
+  umap_centers %>% 
+  filter(dataset_id == "singlecell") %>% 
+  left_join(cluster_annotation) %>% 
+  mutate(UMAP_1_scaled = x,
+         UMAP_2_scaled = y)
+
+  
+
+plot_data %>% 
+  ggplot(aes(UMAP_1_scaled, 
+             UMAP_2_scaled)) +
+  geom_point_rast(aes(color = as.numeric(cluster)),
+                  size = 0.1,
+                  alpha = 0.2,
+                  raster.dpi = 600) +
+  geom_text(data = plot_umap_poly_centers,
+            aes(label = cluster)) +
+  scale_color_gradientn(colors = ggthemes::tableau_color_pal(palette = "Classic Cyclic")(13),
+                        name = "Cluster",
+                        breaks = c(1, 35, 68)) +
+  coord_fixed() +
+  labs(x = "UMAP1",
+       y = "UMAP2") +
+  theme_void()
+ggsave(savepath("UMAP SC point.pdf"),
+       width = 6, height = 6)
+
+```
+
 
 ## UMAP polygons
 
@@ -3853,6 +3906,31 @@ for(dataset_id_ in names(plots)) {
          plot = plots[[dataset_id_]],
          width = 8, height = 8)
 }
+
+
+ 
+umap_poly_data_colored %>% 
+  filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(X, Y, fill = cluster_color, group = polygon_id)) +
+  geom_point(data = umap_data %>% 
+               filter(dataset_id == "singlecell"),
+             aes(UMAP_1_scaled, 
+                 UMAP_2_scaled),
+             color = "darkgray",
+             size = 0.1,
+             inherit.aes = F) +
+  geom_polygon(show.legend = F,
+               # fill = "gray",
+               color = NA,
+               size = 0.1,
+               alpha = 0.8) +
+  scale_fill_identity() +
+  coord_fixed() +
+  theme_void() 
+ggsave(savepath("singlecell nonrast UMAP.pdf"),
+       width = 7, height = 7)    
+
+
 
 ```
 
@@ -4804,6 +4882,133 @@ umap_poly_data_colored %>%
 ggsave(savepath("UMAP disconnected clusters.pdf"),
        width = 8, height = 8)
 
+
+####################################
+
+nn_data <- 
+  gene_nn %>% 
+  filter(dataset_id == "singlecell") %>% 
+  select(gene, neighbor_gene, cor)
+
+nn_genes <- 
+  nn_data %>% 
+  filter(gene == sample(unique(nn_data$gene), 1)) %>% 
+  mutate(pass = 1)
+
+for(i in 2:4) {
+  nn_genes <- 
+    nn_data %>% 
+    filter(gene %in% nn_genes$neighbor_gene) %>% 
+    mutate(pass = i) %>% 
+    bind_rows(nn_genes)
+  
+}
+
+nn_genes <- 
+  nn_genes %>% 
+  group_by(gene, neighbor_gene, cor) %>% 
+  top_n(1, -pass) %>% 
+  ungroup()
+
+plot_data <- 
+  nn_genes %>% 
+  
+  # select(1:3) %>% 
+  filter(gene != neighbor_gene) %>% 
+  as_tbl_graph(directed = F) %>% 
+  mutate(degree = centrality_degree()) %>% 
+  filter(degree > 1) %>% 
+  activate(edges) %>% 
+  slice(sample(1:length(from), 4000)) %>% 
+  activate(nodes) %>% 
+  left_join(nn_genes %>% 
+              select(name = gene, 
+                     pass) %>% 
+              distinct()) %>% 
+  mutate(component = group_components()) %>% 
+  filter(component %in% 1:2)
+  
+
+
+plot_data %>% 
+  mutate(degree = centrality_degree(),
+         component = group_components()) %>% 
+  filter(degree > 1, 
+         component %in% 1:2) %>% 
+  
+  ggraph(layout = "stress") +
+  geom_edge_link(width = 0.1,
+                 show.legend = F,
+                 color = "gray80") +
+  geom_node_point(size = 1) +
+  coord_fixed() +
+  theme_void()
+
+ggsave(savepath("example gene network5.pdf"),
+       width = 6, height = 6)
+```
+
+
+```{r}
+
+# plot_genes <- 
+#   clustering_data %>% 
+#   filter(dataset_id == "singlecell",
+#          cluster == 49)
+# 
+# 
+# plot_net <- 
+#   gene_nn %>% 
+#   filter(dataset_id == "singlecell",
+#          gene %in% plot_genes$gene,
+#          neighbor_gene %in% plot_genes$gene) %>% 
+#   filter(gene != neighbor_gene) %>% 
+#   group_by(gene) %>% 
+#   top_n(2, cor) %>% 
+#   select(2, 3) %>% 
+#   as_tbl_graph(directed = F)
+# 
+# plot_coords <- 
+#   umap_data %>%
+#   left_join(clustering_data) %>% 
+#   filter(dataset_id == "singlecell",
+#          UMAP_2_scaled > -0.5,
+#          cluster == 49) %>% 
+#   select(gene, UMAP_1_scaled, UMAP_2_scaled) %>% 
+#   column_to_rownames("gene") %>% 
+#   {.[as_tibble(plot_net)$name,]}
+# 
+# plot_net %>% 
+#   ggraph(layout = "manual",
+#          x = plot_coords$UMAP_1_scaled,
+#          y = plot_coords$UMAP_2_scaled) +
+#   geom_edge_link() +
+#   geom_node_point()
+
+# umap_poly_data_colored %>%
+#   filter(dataset_id == "singlecell",
+#          cluster == 49) %>% 
+#   ggplot(aes(X, Y, fill = cluster_color, group = polygon_id)) +
+#   geom_point(data = umap_data %>%
+#                left_join(clustering_data) %>% 
+#                filter(dataset_id == "singlecell",
+#                       UMAP_2_scaled > -0.5,
+#                       cluster == 49),
+#              aes(UMAP_1_scaled, 
+#                  UMAP_2_scaled),
+#              color = "darkgray",
+#              size = 0.1,
+#              inherit.aes = F) +
+#   geom_polygon(show.legend = F,
+#                # fill = "gray",
+#                color = NA,
+#                size = 0.1,
+#                alpha = 0.8) +
+#   scale_fill_identity() +
+#   coord_fixed() +
+#   theme_void() 
+# ggsave(savepath("singlecell nonrast UMAP 49.pdf"),
+#        width = 2, height = 2)  
 ```
 
 
@@ -5793,6 +5998,241 @@ plot %>%
   htmlwidgets::saveWidget(savepath("interactive specificity net.html"))
 
 ```
+
+## Gene class bubble heatmap
+
+```{r}
+plot_data <-
+  enrichment_data %>%
+  filter(dataset_id == "singlecell") %>% 
+  filter(test_type %in% c("protein_class")) %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, cluster, full_annotation), sep = " ") %>% 
+  unite(cluster, cluster, full_annotation) %>% 
+  # filter(p.adjust <= 0.001) %>% 
+  select(cluster, ID, odds_ratio) %>% 
+  group_by_all() %>% 
+  mutate(capped_odds_ratio = min(c(odds_ratio,
+                                   50))) %>% 
+  ungroup() %>% 
+  filter(ID %in% c("Predicted intracellular proteins",
+                   "Predicted membrane proteins",
+                   "Predicted secreted proteins")) %>% 
+  mutate(cluster_n = str_remove(cluster, "_.*"))
+
+cluster_levels <- 
+  clustering_data %>% 
+  select(dataset_id, cluster) %>% 
+  distinct() %>% 
+  arrange(dataset_id, as.numeric(cluster)) %>% 
+  left_join(cluster_annotation %>% 
+              select(dataset_id, cluster, full_annotation), sep = " ") %>% 
+  unite(cluster, dataset_id, cluster, full_annotation)
+
+
+
+plot_size_range <- c(1, 4)
+
+plot_legend_settings <- 
+  tibble(odds_ratio_str = c(1, 10, 20, 30, 40, ">50"),
+         y = 1:6,
+         odds_ratio = c(1, 10, 20, 30, 40, 50)) 
+
+plot_legend <-
+  plot_legend_settings %>% 
+  ggplot(aes(1, y, 
+             size = odds_ratio,
+             fill = odds_ratio,
+             label = odds_ratio_str)) +
+  geom_point(shape = 21,
+             show.legend = F) +
+  geom_text(size = 4, 
+            hjust = 0,
+            nudge_x = 0.1) +
+  annotate("text", x = 1, y = 7, label = "Odds ratio",
+           fontface = "bold", hjust = 0) +
+  scale_x_continuous(limits = c(0, 2)) +
+  scale_y_continuous(limits = c(0, 7)) +
+  scale_fill_gradient(name = "Odds ratio",
+                      low = "white", high = "orangered",
+                      breaks = plot_legend_settings$odds_ratio,
+                      limits = range(plot_legend_settings$odds_ratio)) + 
+  scale_size_continuous(name = "Odds ratio", 
+                        range = plot_size_range, 
+                        breaks = plot_legend_settings$odds_ratio,
+                        limits = range(plot_legend_settings$odds_ratio)) +
+  theme_void()
+
+
+plot_clustering <- 
+  plot_data %>% 
+  select(cluster, ID, odds_ratio) %>% 
+  spread(ID, odds_ratio, fill = 0) %>% 
+  column_to_rownames("cluster") %>%
+  list(tissue = t(.), 
+       cluster = .) %>%
+  map(. %>% 
+        dist(method = "binary") %>% 
+        hclust(method = "ward.D2"))
+
+plot_order <- 
+  list(cluster = unique(c(with(plot_clustering$cluster,
+                               labels[order]),
+                          cluster_levels$cluster)),
+       ID = with(plot_clustering$tissue,
+                 labels[order]))
+
+plot <-
+  plot_data %>%
+  ungroup() %>% 
+  mutate(cluster = factor(cluster,
+                          plot_order$cluster),
+         ID = factor(ID,
+                     plot_order$ID)) %>%
+  ggplot(aes(ID, cluster, 
+             size = capped_odds_ratio, 
+             fill = capped_odds_ratio)) +
+  geom_point(shape = 21,
+             show.legend = T) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust = 0.5),
+        legend.position = "right") +
+  # coord_fixed() +
+  scale_fill_gradient(name = "Odds ratio",
+                      low = "white", high = "orangered") + 
+  scale_size_continuous(name = "Odds ratio", 
+                        range = plot_size_range) +
+  theme(axis.title = element_blank()) + 
+  coord_fixed()
+
+plot
+ggsave(savepath("Protein class Bubble heatmap.pdf"),
+       plot = plot,
+       width = 6, height = 10)
+
+plot_data %>% 
+  as_tbl_graph() %>% 
+  mutate(node_color = name %>% 
+           str_extract(paste("Predicted", names(protein_loc_palette), collapse = "|")) %>% 
+           str_remove("Predicted ")) %>% 
+  ggraph(layout = "stress") + 
+  geom_edge_link() +
+  geom_node_point(aes(color = node_color), 
+                  size = 8) +
+  # geom_node_text(aes(label = name),
+  #                size = 2) +
+  scale_color_manual(values = protein_loc_palette[-4], 
+                     na.value = NA) +
+  coord_fixed() +
+  theme_void() 
+ggsave(savepath("Protein class net.pdf"),
+       width = 6, height = 6)
+
+
+plot_data %>% 
+  group_by(cluster) %>% 
+  mutate(type = ID %>% 
+           sort() %>% 
+           str_remove("Predicted ") %>% 
+           str_remove(" proteins") %>% 
+           paste(collapse = ";")) %>% 
+  mutate(cluster_number = str_remove(cluster, "_.*")) %>% 
+  left_join(cluster_annotation %>% 
+              filter(dataset_id == "singlecell") %>% 
+              select(cluster_number = cluster, ann_specificity, ann_function)) %>% 
+  gather(ann_type, term, contains("ann_")) %>% 
+  group_by(type, ann_type, term) %>% 
+  summarise(total_score = sum(odds_ratio)) %>% 
+  # arrange(-total_score)
+  ggplot(aes(label = term, size = total_score)) +
+  ggwordcloud::geom_text_wordcloud() +
+  facet_grid(type ~ ann_type) +
+  scale_size_continuous(range = c(0,5), limits = c(0, 10)) +
+  theme_minimal()
+ggsave(savepath("Protein class word cloud.pdf"),
+       width = 6, height = 10)
+  
+
+
+umap_data
+umap_poly_data
+plot_data
+
+
+umap_poly_data %>% 
+  left_join(plot_data %>% 
+              rename(cluster_name = cluster) %>% 
+              mutate(cluster = str_remove(cluster_name, "_.*")) %>% 
+              group_by(cluster, cluster_name) %>% 
+              summarise(type = ID %>% 
+                          sort() %>% 
+                          str_remove("Predicted ") %>% 
+                          str_remove(" proteins") %>% 
+                          paste(collapse = "/"))) %>% 
+  filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(X, Y, fill = type, group = paste(cluster, sub_cluster))) +
+  # geom_point(data = umap_data %>%
+  #              filter(dataset_id == "singlecell"),
+  #            aes(UMAP_1_scaled,
+  #                UMAP_2_scaled),
+  #            color = "gray50",
+  #            size = 0.1,
+  #            inherit.aes = F) +
+  geom_polygon(show.legend = T,
+               color = "black",
+               size = 0.1) +
+  # geom_text(data =  umap_centers %>% 
+  #             left_join(cluster_annotation)  %>%
+  #             filter(dataset_id == "singlecell") ,
+  #           aes(x, y, label = full_annotation),
+  #           size = 3,
+  #           inherit.aes = F) +
+  scale_fill_manual(values = protein_loc_palette) +
+  coord_fixed() +
+  theme_void() 
+ggsave(savepath("protein class umap.pdf"),
+       width = 6, height = 5)
+
+
+umap_poly_data %>% 
+  left_join(plot_data %>% 
+              rename(cluster_name = cluster) %>% 
+              mutate(cluster = str_remove(cluster_name, "_.*")) %>% 
+              group_by(cluster, cluster_name) %>% 
+              summarise(type = ID %>% 
+                          sort() %>% 
+                          str_remove("Predicted ") %>% 
+                          str_remove(" proteins") %>% 
+                          paste(collapse = "/"))) %>% 
+  filter(dataset_id == "singlecell") %>% 
+  ggplot(aes(X, Y, fill = type, group = paste(cluster, sub_cluster))) +
+  # geom_point(data = umap_data %>%
+  #              filter(dataset_id == "singlecell"),
+  #            aes(UMAP_1_scaled,
+  #                UMAP_2_scaled),
+  #            color = "gray50",
+  #            size = 0.1,
+  #            inherit.aes = F) +
+  geom_polygon(show.legend = T,
+               color = "black",
+               size = 0.1) +
+  geom_text(data =  umap_centers %>%
+              left_join(cluster_annotation)  %>%
+              filter(dataset_id == "singlecell",
+                     cluster %in% plot_data$cluster_n) %>% 
+              mutate(label = paste(ann_specificity, ann_function, sep = "\n")),
+            aes(x, y, label = label),
+            size = 3,
+            lineheight = 0.8,
+            inherit.aes = F) +
+  scale_fill_manual(values = protein_loc_palette) +
+  coord_fixed() +
+  theme_void() 
+ggsave(savepath("protein class umap labeled.pdf"),
+       width = 7, height = 7)
+
+```
+
 
 
 # Classification
@@ -9350,16 +9790,6 @@ clustering_ORA_res <-
 ########################################
 
 
-clustering_ORA_res_filt %>% 
-  mutate(p = -log10(p.adjust),
-         q = -log10(qvalue)) %>% 
-  select(p,
-         odds_ratio,
-         q) %>% 
-  as.data.frame() %>% 
-  head(100) %>% 
-  feature_umap_plot()
-
 clustering_ORA_res_filt <-
   clustering_ORA_res %>% 
   
@@ -9373,6 +9803,18 @@ clustering_ORA_res_filt <-
 
 
 write_csv(clustering_ORA_res_filt, savepath("clustering ORA res.csv"))
+
+
+
+clustering_ORA_res_filt %>% 
+  mutate(p = -log10(p.adjust),
+         q = -log10(qvalue)) %>% 
+  select(p,
+         odds_ratio,
+         q) %>% 
+  as.data.frame() %>% 
+  # head(100) %>% 
+  feature_umap_plot()
 
 clustering_ORA_res_filt %>% 
   ggplot(aes(odds_ratio)) +
@@ -10637,6 +11079,427 @@ plot_pca %>%
   geom_point() +
   geom_text(aes(label = gene_name),
             size = 3, hjust = 1)
+```
+
+### HOX genes
+
+```{r}
+hox_genes <- 
+  gene_info %>% 
+  filter(str_detect(gene_name, "^HOX")) %>% 
+  select(gene = ensg_id, gene_name) %>% 
+  left_join(clustering_data %>% 
+              filter(dataset_id == "singlecell") %>% 
+              group_by(cluster) %>% 
+              mutate(n_tot = n_distinct(gene)) %>% 
+              select(-dataset_id)) 
+
+hox_genes%>% 
+  group_by(cluster, n_tot) %>%
+  count() %>%
+  arrange(-n) %>%
+  mutate(frac = n / n_tot) %>%
+  arrange(-frac) %>% 
+  left_join(cluster_annotation %>% 
+              filter(dataset_id == "singlecell") %>% 
+              select(cluster, full_annotation))
+
+raw_data$singlecell_sample %>% 
+  select(1, contains("Fibroblast")) %>% 
+  filter(ensg_id %in% hox_genes$gene) %>% 
+  gather(cluster, ntpm, -1) %>% 
+  group_by(cluster) %>% 
+  filter(any(ntpm > 10)) %>% 
+  group_by(ensg_id) %>% 
+  mutate(ntpm = ntpm / max(ntpm)) %>% 
+  spread(cluster, ntpm) %>% 
+  column_to_rownames("ensg_id") %>% 
+  pheatmap(fontsize = 8)
+
+```
+
+
+### Cluster 25 and 31
+
+```{r}
+
+plot_genes <- 
+  clustering_data %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(cluster %in% c(25, 31)) %>% 
+  arrange(cluster)
+
+
+plot_data <- 
+  raw_data$singlecell_consensus %>% 
+  filter(ensg_id %in% plot_genes$gene) %>% 
+  gather(cell_type, ntpm, -1) %>% 
+  group_by(ensg_id) %>% 
+  mutate(ntpm = ntpm / max(ntpm, na.rm = T)) %>% 
+  spread(cell_type, ntpm) %>% 
+  column_to_rownames("ensg_id") 
+
+
+plot_data %>% 
+  # t() %>% 
+  # scale() %>% 
+  # t() %>% 
+  
+  
+  # t() %>% 
+  # {. / apply(., MARGIN = 1, max)} %>% 
+  pheatmap(show_rownames = F,
+           color = inferno(30, direction = -1),
+           clustering_method = "ward.D2",
+           annotation_row = plot_genes %>% 
+             select(gene, cluster) %>% 
+             column_to_rownames("gene"))
+
+plot_data[plot_genes$gene,] %>% 
+  t() %>%
+  # {log10(. + 1)} %>%
+  scale() %>%
+  t() %>%
+  as_tibble(rownames = "gene") %>% 
+  left_join(plot_genes %>% 
+              select(-dataset_id)) %>% 
+  select(1, cluster, everything()) %>% 
+  group_by(cluster) %>% 
+  do({
+    select(., -cluster) %>% 
+      column_to_rownames("gene") %>% 
+      cluster_wide_data(cluster_cols = F, 
+                        clustering_method = "ward.D2") %>% 
+      as_tibble(rownames = "gene")
+    
+  }) %>% 
+  ungroup() %>% 
+  select(-cluster) %>% 
+  column_to_rownames("gene") %>% 
+  
+  pheatmap(show_rownames = F,
+           color = inferno(30, direction = -1),
+           clustering_method = "ward.D2",
+           annotation_row = plot_genes %>% 
+             select(gene, cluster) %>% 
+             column_to_rownames("gene"),
+           cluster_rows = F)
+
+
+plot_data[plot_genes$gene,] %>% 
+  as_tibble(rownames = "gene") %>% 
+  gather(cell_type, ntpm, -1) %>% 
+  left_join(plot_genes) %>% 
+  ggplot(aes(ntpm, cell_type, fill = cluster)) +
+  geom_boxplot(outlier.colour = NA) +
+  theme_minimal()
+
+
+
+plot_data2 <- 
+  raw_data$singlecell_consensus %>% 
+  filter(ensg_id %in% plot_genes$gene) %>% 
+  column_to_rownames("ensg_id") %>% 
+  # {log10(. + 1)} %>% 
+  t() %>% 
+  scale() %>% 
+  t()
+
+plot_pca <- 
+  plot_data2 %>% 
+  t() %>% 
+  do_pca() %>% 
+  get_pca_scores() 
+
+plot_umap <- 
+  plot_pca %>% 
+  do_umap() 
+  
+plot_umap %>% 
+  as_tibble(rownames = "gene") %>% 
+  left_join(plot_genes) %>% 
+  ggplot(aes(UMAP1, UMAP2, color = cluster)) +
+  geom_point() +
+  coord_fixed()
+
+plot_pca %>% 
+  as_tibble(rownames = "gene") %>% 
+  left_join(plot_genes) %>% 
+  ggplot(aes(PC1, PC2, color = cluster)) +
+  geom_point() +
+  coord_fixed()
+
+apa <- 
+  plot_pca[,1:30] %>% 
+  # head(100) %>% 
+  FNN::get.knn(k = 20)
+
+
+apa$nn.index %>% 
+  as_tibble(rownames = "gene") %>% 
+  gather(temp, neighbor, -1) %>% 
+  select(-temp) %>% 
+  mutate(temp = 1) %>% 
+  spread(neighbor, temp, fill = 0) %>% 
+  mutate(gene = rownames(plot_pca)[as.numeric(gene)]) %>% 
+  column_to_rownames("gene") %>% 
+  do_umap(metric = "hamming") %>%
+  as_tibble(rownames = "gene") %>% 
+  left_join(plot_genes) %>% 
+  ggplot(aes(UMAP1, UMAP2, color = cluster)) +
+  geom_point() +
+  coord_fixed()
+
+
+```
+
+### Cluster 32
+
+```{r}
+
+opencell <- 
+  read_csv("data/meta/opencell-protein-interactions.csv")
+
+
+opencell %>% 
+  select(3, 4) %>% 
+  left_join(clustering_data %>% 
+              filter(dataset_id == "singlecell") %>% 
+              select(gene, cluster),
+            by = c("target_ensg_id" = "gene")) %>% 
+    left_join(clustering_data %>% 
+                filter(dataset_id == "singlecell") %>% 
+              select(gene, cluster),
+            by = c("interactor_ensg_id" = "gene"),
+            suffix = c("_target", "_interactor")) %>% 
+  set_colnames(c("gene1", "gene2", "cluster1", "cluster2")) %>%
+  
+  bind_rows(tibble(gene1 = .$gene2, gene2 = .$gene1,
+                   cluster1 = .$cluster2, cluster2 = .$cluster1)) %>% 
+  filter(cluster1 < cluster2 |
+           (cluster1 == cluster2 & 
+              gene1 < gene2)) %>% 
+  distinct() %>% 
+  group_by(cluster1) %>% 
+  mutate(tot1 = n_distinct(gene1)) %>% 
+  group_by(cluster2) %>% 
+  mutate(tot2 = n_distinct(gene2)) %>% 
+  group_by(cluster1, cluster2, tot1, tot2) %>% 
+  count() %>% 
+  ungroup() %>% 
+  group_by_all() %>% 
+  mutate(frac = n / min(c(tot1, tot2))) %>% 
+  ungroup() %>% 
+  arrange(-frac) %>% 
+  # filter(cluster1 == cluster2) %>% 
+  print(n = 100)
+# as_tbl_graph()
+
+
+
+
+plot_genes <- 
+  clustering_data %>% 
+  filter(dataset_id == "singlecell") %>% 
+  filter(cluster %in% c(32)) %>% 
+  arrange(cluster) %>% 
+  left_join(gene_info %>% 
+              select(gene = ensg_id,
+                     gene_name))
+
+  
+table(plot_genes$gene %in% c(opencell$target_ensg_id, 
+                             opencell$interactor_ensg_id))
+
+ribo_prots <- read_tsv("data/meta/ribosomal_proteins.txt")
+
+opencell_32 <- 
+  opencell %>% 
+  filter(target_ensg_id %in% plot_genes$gene |
+           interactor_ensg_id %in% plot_genes$gene) %>% 
+  mutate(type = case_when(target_ensg_id %in% plot_genes$gene &
+                            interactor_ensg_id %in% plot_genes$gene ~ "both",
+                          target_ensg_id %in% plot_genes$gene ~ "target",
+                          interactor_ensg_id %in% plot_genes$gene ~ "interactor"),
+         type_ribo = case_when(target_ensg_id %in% ribo_prots$ensg_id &
+                            interactor_ensg_id %in% ribo_prots$ensg_id ~ "both",
+                          target_ensg_id %in% ribo_prots$ensg_id ~ "target",
+                          interactor_ensg_id %in% ribo_prots$ensg_id ~ "interactor")) 
+
+opencell_32 %>% 
+  select(3, 4) %>% 
+  gather(a, b) %>% 
+  select(2) %>% 
+  filter(b %in% plot_genes$gene) %>% 
+  distinct()
+
+  
+
+opencell_32 %>% 
+  select(1, 2, type) %T>% 
+  {
+    group_by(., type) %>% 
+      count() %>% 
+      print()
+  } %>% 
+  as_tbl_graph() %>% 
+  ggraph() +
+  geom_edge_link() +
+  geom_node_point(aes(color = name %in% plot_genes$gene_name)) +
+  coord_fixed() +
+  theme_void()
+
+opencell_32 %>% 
+  select(3, 4, type) %T>% 
+  {
+    group_by(., type) %>% 
+      count() %>% 
+      print()
+  } %>% 
+  as_tbl_graph() %>% 
+  ggraph() +
+  geom_edge_link() +
+  geom_node_point(aes(color = name %in% ribo_prots$ensg_id)) +
+  coord_fixed() +
+  theme_void()
+
+opencell_32 %>% 
+  filter(type == "both") %>% 
+  select(3, 4) %>% 
+  gather(a, b) %>% 
+  pull(b) %>% 
+  n_distinct()
+  
+
+plot_data <-
+  opencell_32 %>% 
+  filter(type == "both") %>%
+  select(3, 4, type) %>% 
+  distinct() %>% 
+  as_tbl_graph() %>% 
+  mutate(component = group_components(), 
+         degree = centrality_degree()) %>% 
+  mutate(type = ifelse(name %in% ribo_prots$ensg_id,
+                       "Ribosomal",
+                       "Other")) %>% 
+  left_join(gene_info %>% 
+              select(name = ensg_id,
+                     gene_name)) 
+
+plot_data %>% 
+  group_by(component) %>% 
+  # mutate(label = ifelse(rank(-degree, ties.method = "random") <= 30 | type == "Ribosomal",
+  #                       gene_name,
+  #                       NA)) %>% 
+  ggraph(layout = "kk") +
+  geom_edge_link(color = "gray30", width = 0.25,
+                 alpha = 0.15) +
+  geom_node_point(aes(color = type),
+                      size = 1) +
+  geom_node_text(aes(label = gene_name),
+                 size = 2,
+                 vjust = -0.5) +
+  coord_fixed() +
+  scale_color_manual(values = c("Ribosomal" = "orangered",
+                                "Other" = "gray20")) +
+  theme_void()
+ggsave(savepath("Cluster 32 ribosomal opencell network.pdf"),
+       width = 8, height = 8)
+
+plot_data %>% 
+  as_tibble() %>% 
+  group_by(type) %>% 
+  count()
+
+
+
+umap_data %>% 
+  filter(dataset_id == "singlecell") %>% 
+  left_join(clustering_data %>% 
+              filter(dataset_id == "singlecell")) %>% 
+  mutate(is_cluster_32 = ifelse(cluster == 32,
+                                "yes",
+                                "no"),
+         type = case_when(gene %in% ribo_prots$ensg_id & cluster == 32~ 
+                            "Ribosomal",
+                          cluster == 32 ~ "Other",
+                          T ~ "Not cluster 32")) %>% 
+  ggplot(aes(UMAP_1_scaled, UMAP_2_scaled, color = type)) +
+  geom_point() +
+  facet_zoom(xlim = c(0.1, 0.2), 
+             ylim = c(0.15, 0.3), ) + 
+  
+  scale_color_manual(values = c("Ribosomal" = "orangered",
+                                "Other" = "gray20", 
+                                "Not cluster 32" = "gray60")) +
+  theme(panel.grid = element_blank()) +
+  coord_fixed() 
+
+
+plot_coords <- 
+  umap_data %>% 
+  filter(dataset_id == "singlecell") %>% 
+  select(gene, x = UMAP_1_scaled, y = UMAP_2_scaled) %>% 
+  column_to_rownames("gene") %>% 
+  {.[as_tibble(plot_data)$name,]}
+
+plot_data %>% 
+  group_by(component) %>% 
+  # mutate(label = ifelse(rank(-degree, ties.method = "random") <= 30 | type == "Ribosomal",
+  #                       gene_name,
+  #                       NA)) %>% 
+  ggraph(layout = "manual",
+         x = plot_coords$x,
+         y = plot_coords$y) +
+  geom_edge_link(color = "gray30", width = 0.25,
+                 alpha = 0.15) +
+  geom_point(data = umap_data %>%
+               left_join(clustering_data) %>% 
+               filter(dataset_id == "singlecell",
+                      cluster == 32) %>% 
+               select(gene, x = UMAP_1_scaled, y = UMAP_2_scaled) %>% 
+               column_to_rownames("gene"),
+             aes(x, y),
+             color = "green",
+             size = 2) +
+  geom_node_point(aes(color = type),
+                  size = 2) +
+  geom_node_text(aes(label = gene_name),
+                 size = 2,
+                 vjust = -0.5) +
+  coord_fixed() +
+  scale_color_manual(values = c("Ribosomal" = "orangered",
+                                "Other" = "gray20")) +
+  scale_x_continuous(limits = c(0.10, 0.18)) + 
+  scale_y_continuous(limits = c(0.18, 0.27)) +
+  # theme_minimal()
+  theme_void()
+
+opencell %>% 
+  filter(str_detect(interactor_gene_name, "^EIF2AK2") |
+           str_detect(target_gene_name, "^EIF2AK2"))
+
+clustering_data %>% 
+  filter(dataset_id == "singlecell") %>% 
+  left_join(gene_info %>% 
+              select(gene = 2, 
+                     gene_name)) %>% 
+  filter(gene_name == "TP53") %>% 
+  left_join(cluster_annotation %>% 
+              select(1, 2,  full_annotation))
+
+
+
+# opencell_32 %>% 
+#   filter(target_gene_name == "TP53" |
+#            interactor_gene_name == "TP53") %>% 
+#   print(n = 100)
+
+opencell_32 %>% 
+  filter(target_gene_name == "TPT1" |
+           interactor_gene_name == "TPT1") %>% 
+  print(n = 100)
+
 ```
 
 
