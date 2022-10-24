@@ -196,8 +196,8 @@ HPA_gene_clustering <-
     ncomp <- # Kaiser's rule: retain factors whose eigenvalues are greater than 1 (they explain at least as much variance as one sample in the original dataset)
       pca_data$sdev[(pca_data$sdev)^2 >= 1] %>% # under some assumptions, variance = eigenvalues
       tail(1) %>%  
-      enframe () %$% 
-      name 
+      enframe() %$% 
+      name
     ncomp <- as.numeric(gsub("PC", "", ncomp))
     
     if (pca_data$stats[ncomp, ]$R2cum < 0.8) {
@@ -207,6 +207,10 @@ HPA_gene_clustering <-
         head(1)
     }
 
+    if(length(ncomp) == 0) {
+      ncomp = npcs
+    }
+    
     plot <- 
       pca_data$stats %>%
       ggplot(aes(PC,R2cum)) +
