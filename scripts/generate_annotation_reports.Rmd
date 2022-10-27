@@ -46,9 +46,9 @@ simplify <- clusterProfiler::simplify
 ## File structure
 ```{r}
 
-dataset_metadata <- read_csv("run_settings/20220222_settings.csv")
+dataset_metadata <- read_csv("run_settings/20221004_settings.csv")
 
-data_paths <- read_csv("run_settings/20211012 all_datasets.csv")
+data_paths <- read_csv("run_settings/20221020 all_datasets.csv")
 
 file_structure <-
   create_folder_structure(dataset_id = dataset_metadata$dataset_id,
@@ -104,56 +104,56 @@ gene_info <-
 
 ```{r}
 
-enrichment_settings <- 
-  read_csv("run_settings/20211013_enrichment_settings.csv")
+enrichment_settings <-
+  read_csv("run_settings/20221027 enrichment_settings.csv")
 
 
-enrichment_settings_versions <- 
-  enrichment_settings %>% 
-  mutate(version = case_when(is.na(version) & 
+enrichment_settings_versions <-
+  enrichment_settings %>%
+  mutate(version = case_when(is.na(version) &
                                id == "KEGG" ~ gsub("-", "", Sys.Date()),
                              !is.na(version) ~ version))
 
 
 
-database_terms <- 
-  enrichment_settings %>% 
-  filter(!is.na(file)) %>% 
-  group_by(id) %>% 
+database_terms <-
+  enrichment_settings %>%
+  filter(!is.na(file)) %>%
+  group_by(id) %>%
   do({
     g_data <<- .
-    
-    out_db <- 
+
+    out_db <-
       get_db(enrichment_settings, g_data$id)
-      
+
     if(g_data$gene_format != "ensembl") {
       gene_format_function <- gene_formatting_functions[[g_data$gene_format]]
-      
-      out_db <- 
+
+      out_db <-
         out_db %>%
         gene_format_function()
-      
+
     }
-    
+
     stopifnot(all(names(out_db) == c("ensg_id", "term", "term_id")))
-    
+
     out_db
-    
-  }) %>% 
+
+  }) %>%
   ungroup()
 
 
 database_terms %>%
-  filter(id %in% c("GO_BP_original", 
+  filter(id %in% c("GO_BP_original",
                    "GO_CC_original",
-                   "GO_MF_original")) %>% 
-  group_by(id, term_id, term) %>% 
-  summarise(n = n_distinct(ensg_id))%>% 
-  # filter(grepl("GO", id)) %>% 
+                   "GO_MF_original")) %>%
+  group_by(id, term_id, term) %>%
+  summarise(n = n_distinct(ensg_id))%>%
+  # filter(grepl("GO", id)) %>%
   mutate(type = case_when(n < 8 ~ as.character(n),
                           T ~ "8+")) %>%
-  group_by(id, type) %>% 
-  count() %>%  
+  group_by(id, type) %>%
+  count() %>%
   ggplot(aes(id, n, label = n, fill = type)) +
   geom_col(color = "black") +
   geom_text(position = position_stack(vjust = 0.5)) +
