@@ -1,0 +1,19 @@
+id,description,type,gene_format,version,file
+GO_BP_simplified,GO analysis Biological Process Simplified terms,External,ensembl,Ensembl_103,
+GO_CC_simplified,GO analysis Cellular Component Simplified terms,External,ensembl,Ensembl_103,
+GO_MF_simplified,GO analysis Molecular Function Simplified terms,External,ensembl,Ensembl_103,
+GO_BP_original,GO analysis Biological Process ,External,ensembl,Ensembl_103,Ensembl103 GO terms.txt
+GO_CC_original,GO analysis Cellular Component ,External,ensembl,Ensembl_103,Ensembl103 GO terms.txt
+GO_MF_original,GO analysis Molecular Function ,External,ensembl,Ensembl_103,Ensembl103 GO terms.txt
+KEGG,KEGG pathways,External,,,
+secretome_location,Secretome location,HPA,ensembl,HPA21_20220222,proteinatlas21_20220222.tsv
+specificity_blood,Specificity classification Blood,HPA,ensembl,HPA21,bloodcells_hpa_category_103.tsv
+specificity_brain,Specificity classification Brain,HPA,ensembl,HPA21,brain_human_regional_category_103v2.tsv
+specificity_singlecell,Specificity classification Single cell type,HPA,ensembl,HPA22,single_cell_category_v3_103.tsv
+specificity_tissue,Specificity classification Tissue,HPA,ensembl,HPA21,consensus_all_category_103v2.tsv
+specificity_celline,Specificity classification Cell line,HPA,ensembl,HPA22,celline_disease_category_hpa_ccle_103.tsv
+subcellular_location,Subcellular location,HPA,ensembl,HPA21,subcellular_location_HPA21.tsv
+panglao_cellmarkers,Cell type markers from the Panglao database,External,gene names,20200327,PanglaoDB_markers_27_Mar_2020.tsv
+protein_class,HPA protein class,HPA,ensembl,HPA21_20220222,proteinatlas21_20220222.tsv
+reactome,Reactome pathways,External,ensembl,20210903,Ensembl2Reactome_All_Levels_20210903.txt
+trrust,TRRUST TFs,External,gene names,20180416,trrust_rawdata.human_20180416.tsv
