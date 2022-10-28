@@ -109,8 +109,8 @@ run_settings <-
        final_consensus_resolutions = 
          list("blood" = 4.7,
               "brain" = 6.7, #before 2022-02-10 (HPA-v1)-> 6.1
-              "celline" = 1.7,
-              "singlecell" = 3.1,
+              "celline" = 1.5,
+              "singlecell" = 4.5,
               "tissue" = 6.3), #before 2022-02-10 (HPA-v1)-> 7.3
        # Resolution limits are chosen by our experience:
        resolution_upper_limit = c("blood" = 14.5,
@@ -132,8 +132,8 @@ run_settings <-
        # Pruning of SNN network, default 1/15 jaccard index: 
        pruning = c("blood" = 1/15,
                    "brain" = 1/15,
-                   "celline" = 1/15,
-                   "singlecell" = 1/15,
+                   "celline" = 1/20,
+                   "singlecell" = 1/20,
                    "tissue" = 1/15))
 
 #saveRDS(run_settings, ".rds")
@@ -221,7 +221,7 @@ all_data_cluster <-
   bind_rows(.id = "dataset_id") %>% 
   inner_join(expressed_genes) %>% 
   group_by(dataset_id) %>%    
-  partition(cluster) %>% 
+  # partition(cluster) %>%
   do({
     g_data <- .
 
@@ -286,7 +286,7 @@ all_data_cluster <-
     cluster_res
     
   }) %>%
-  collect() %>% 
+  # collect() %>%
   ungroup()
 
 rm(cluster)
@@ -326,9 +326,9 @@ t <- Sys.time()
 all_clusters_consensus <- 
   all_data_cluster %>% 
   group_by(dataset_id) %>% 
-  partition(cluster) %>% 
+  # partition(cluster) %>% 
   do({
-    g_data <- .
+    g_data <<- .
     
     g_dataset_id <- 
       unique(g_data$dataset_id)
@@ -361,7 +361,7 @@ all_clusters_consensus <-
     }
     
   }) %>%  
-   collect() %>% 
+   # collect() %>% 
   ungroup()
 
 rm(cluster)
@@ -378,8 +378,7 @@ all_clusters_consensus %>%
   facet_grid(~dataset_id, scales = "free_x") +
   scale_color_manual(values = dataset_palette) +
   xlab("Resolution parameter") +
-  ylab("Number of clusters (k)")#+ 
-  theme(panel.spacing = unit(4, "lines"))
+  ylab("Number of clusters (k)")
 
 all_clusters_consensus %>%
   group_by(dataset_id) %>%
@@ -392,7 +391,7 @@ all_clusters_consensus %>%
   mutate(value = 100) %>% 
   ggplot(aes(x = resolution, y = value, fill = dataset_id)) +
   geom_bar(stat = "identity") +
-  facet_grid(~dataset_id, scales = "free_x") +
+  facet_grid(~dataset_id, scales = "free_x", space = "free") +
   theme_bw() +
   scale_fill_manual(values = dataset_palette) +
   xlab("Resolution parameter") +
@@ -471,7 +470,7 @@ graph_umaps <-
   set_names(., .) %>% 
   pblapply(function(dataset_id_) {
     
-    graph_ <- all_data_graphs[[dataset_id_]]
+    dataset_graph <<- all_data_graphs[[dataset_id_]]
     
     savefile_UMAP <- 
       paste(file_structure[[dataset_id_]]$UMAP, "UMAP.tsv", sep = "/")
@@ -485,7 +484,7 @@ graph_umaps <-
       set.seed(42)
 
       UMAP_res <- 
-        graph_$snn %>% 
+        dataset_graph$snn %>% 
         RunUMAP(umap.method = "umap-learn") %>% 
         {.@cell.embeddings} %>% 
         as_tibble(rownames = "gene") 
@@ -918,15 +917,15 @@ ggplot(aes(x = UMAP_1_scaled, y = UMAP_2_scaled, color = as.factor(cluster))) +
 
 
 ############ UMAPS
-all_clusterings<- 
-  all_clusterings %>% 
-  mutate(resolution = as.character(resolution))
+# all_clusterings<- 
+#   all_clusterings %>% 
+#   mutate(resolution = as.character(resolution))
 
-blood_clustering <- all_clusterings %>% filter(dataset_id == "blood", resolution == "4.7")
-brain_clustering <- all_clusterings %>% filter(dataset_id == "brain", resolution == "6.1")
-celline_clustering <- all_clusterings %>% filter(dataset_id == "celline", resolution == "1.7")
-tissue_clustering_56 <- all_clusterings %>% filter(dataset_id == "tissue", resolution == "3.5")
-tissue_clustering_87 <- all_clusterings %>% filter(dataset_id == "tissue", resolution == "7.3")
+# blood_clustering <- all_clusterings %>% filter(dataset_id == "blood", resolution == "4.7")
+# brain_clustering <- all_clusterings %>% filter(dataset_id == "brain", resolution == "6.1")
+# celline_clustering <- all_clusterings %>% filter(dataset_id == "celline", resolution == "1.7")
+# tissue_clustering_56 <- all_clusterings %>% filter(dataset_id == "tissue", resolution == "3.5")
+# tissue_clustering_87 <- all_clusterings %>% filter(dataset_id == "tissue", resolution == "7.3")
 
 
 graph_umaps %>% 
@@ -1021,8 +1020,8 @@ brain <- all_clusterings %>% filter(dataset_id == "brain",
                                           k > 40,
                                           k < 80)
 celline <- all_clusterings %>% filter(dataset_id == "celline",
-                                          k > 40,
-                                          k < 70)
+                                          k > 60,
+                                          k < 90)
 tissue <- all_clusterings %>% filter(dataset_id == "tissue",
                                           k > 60, #70
                                           k < 90)#100
@@ -1183,6 +1182,14 @@ p5 <- p5 +
   
 p1 / p2 / p3 / p4 / p5 +
     plot_layout(guides = "collect")
+ggsave(savepath("Clustering evalueation summary.pdf"),
+       width = 12, height = 11)
+
+
+
+
+max_ARI
+
 ```
 
 
@@ -1195,8 +1202,8 @@ all_clusters_consensus %>%
 
 all_clusters_consensus %>% 
   left_join(res_k) %>% 
-  filter(dataset_id == "brain",
-         k == 72) %>% 
+  filter(dataset_id == "singlecell",
+         k == 77) %>% 
   pull(resolution) %>% unique()
 
 all_clusters_consensus %>% 
@@ -1282,7 +1289,7 @@ final_clusterings %>%
 ## Generate hulls
 ```{r}
 
-umap_clusteirng <- 
+umap_clustering <- 
   graph_umaps %>% 
   select(-UMAP_1,- UMAP_2) %>% 
   left_join(final_clusterings)
@@ -1302,9 +1309,8 @@ cluster_copy(cluster, c("generate_cluster_hulls",
 # Calculate cluster polygons (based on DBSCAN)
 t <- Sys.time()
 graph_umaps_hulls <- 
-  umap_clusteirng %>% 
+  umap_clustering %>% 
   group_by(dataset_id) %>% 
-  filter(dataset_id =="tissue") %>% 
   #partition(cluster) %>% 
   do({
     g_data <- .
@@ -1364,12 +1370,16 @@ graph_umaps_hulls %>%
   geom_polygon(show.legend = F,
                color = "black") +
   theme_bw() +
-  geom_point(data = all_cluster_centers, aes(x, y), inherit.aes = F, size = 1) +
+  geom_point(data = all_cluster_centers, 
+             aes(x, y), 
+             inherit.aes = F, 
+             size = 0.2,
+             show.legend = F) +
   facet_grid(~dataset_id) +
   coord_fixed()
 
-ggsave(run_id_savename("UMAP scaled hulls.pdf"),
-       width = 8, height = 5)
+ggsave(savepath("UMAP scaled hulls.pdf"),
+       width = 16, height = 8)
 
 
 ```
