@@ -7,4 +7,5 @@ tissue,region,region_aggregated_tissue_103.tsv
 tissue,consensus,consensus_max_of_all_groups_103.tsv
 celline,consensus,consensus_celline_hpa_ccle.tsv
 singlecell,sample,sc_cluster_data.tsv
+celline,disease,celline_hpa_ccle_disease.tsv
 singlecell,consensus,single_cell_aggregated_data_v3_103.tsv

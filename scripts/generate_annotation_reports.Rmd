@@ -104,8 +104,9 @@ gene_info <-
 
 ```{r}
 
+enrichment_settings_file <- "run_settings/20221027 enrichment_settings.csv"
 enrichment_settings <-
-  read_csv("run_settings/20221027 enrichment_settings.csv")
+  read_csv(enrichment_settings_file)
 
 
 enrichment_settings_versions <-
@@ -161,7 +162,9 @@ database_terms %>%
   scale_fill_manual(values = colorRampPalette(c("orangered", "gray"))(8)) +
   theme_bw()
 
-
+write_tsv(database_terms,
+          paste0("data/processed/", str_remove(str_remove(enrichment_settings_file, ".*\\/"), " .*"),
+                 " database terms.tsv"))
 ```
 
 
@@ -609,6 +612,14 @@ heatmap_palette <-
 heatmap_data <-
   readRDS("data/processed/combined_HPA_expression_data.RDS")
 
+heatmap_datasets <- 
+  dataset_metadata %>% 
+  unite(default, dataset_id, type, remove = F) %>% 
+  unite(additional, dataset_id, additional_heatmap, remove = F) %>% 
+  select(1,2) %>% 
+  gather(type, id) %>% 
+  filter(!str_detect(id, "NA")) 
+
 heatmap_settings <- 
   dataset_metadata %>%
   select(dataset_id, heatmap = type, additional_heatmap) %>% 
@@ -618,18 +629,29 @@ heatmap_settings <-
   filter(!is.na(filename)) %>% 
   left_join(clustering_data %>% 
               select(dataset_id, cluster) %>% 
-              distinct())
+              distinct()) %>% 
+  mutate(id = paste(dataset_id, type, sep = "_")) %>% 
+  filter(id %in% heatmap_datasets$id)
+
+
 
 heatmap_data_scaled <- 
-  heatmap_data %>%
+  heatmap_data[heatmap_datasets$id] %>%
   map(. %>% 
-        gather(sample, value, -1) %>% 
-        group_by(ensg_id) %>% 
-        mutate(value_scaled = value / max(value),
-               value_zscore = (value - mean(value, na.rm = T)) / 
-                 sd(value, na.rm = T)) %>% 
-        ungroup()) %>% 
+        gather(sample, value, -1)) %>% 
   bind_rows(.id = "id") %>% 
+  
+  group_by(id, ensg_id) %>% 
+  mutate(value_scaled = value / max(value),
+         value_zscore = (value - mean(value, na.rm = T)) / 
+           sd(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  left_join(., 
+            select(., id) %>% 
+              distinct() %>% 
+              separate(id, into = c("dataset_id", "type"),
+                       remove = F),
+            by = "id") %>% 
   separate(id, into = c("dataset_id", "type")) %>% 
   inner_join(clustering_data %>% 
                select(dataset_id, gene, cluster),
@@ -678,6 +700,7 @@ heatmap_data_scaled %>%
       g_cluster_data %>% 
       select(ensg_id, sample, value_zscore) %>% 
       spread(sample, value_zscore) %>% 
+      filter(complete.cases(.)) %>% 
       column_to_rownames("ensg_id") 
     
     gene_hclust <- 
@@ -763,10 +786,12 @@ heatmap_data_scaled %>%
     
     ggsave(plot_savename_zscore, plot = p1,  
            width = plot_width, 
-           height = 5)
+           height = 5,
+           limitsize = F)
     ggsave(plot_savename_scaled, plot = p2,
            width = plot_width, 
-           height = 5)
+           height = 5,
+           limitsize = F)
     
     tibble()
   }) %>% 

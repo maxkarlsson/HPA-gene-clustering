@@ -47,6 +47,9 @@ processing_functions <-
        celline_consensus = . %>% 
          select(ensg_id, sample = celline, ntpm) %>%
          spread(sample, ntpm),
+       celline_disease = . %>% 
+         select(ensg_id, sample = cancer, ntpm) %>%
+         spread(sample, ntpm),
        singlecell_sample = . %>% 
          spread(sample, ntpm),
        singlecell_consensus = . %>% 
@@ -90,4 +93,7 @@ processed_data %>%
 
 
 saveRDS(processed_data, "data/processed/combined_HPA_expression_data.RDS")
+saveRDS(processed_data, paste0("data/processed/", 
+                               str_remove(dataset_path_file, ".*/") %>% 
+                                 str_remove("\\.csv"), " combined_HPA_expression_data.RDS"))
 

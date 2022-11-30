@@ -297,6 +297,7 @@ HPAspecificity_formatting_function <-
   separate_rows(term, sep = ",") %>% 
   mutate(term = gsub(";", ", ", term)) %>% 
   filter(!is.na(term)) %>% 
+  filter(term != "NULL") %>% 
   mutate(term = trimws(term), 
          term_id = term)
 
